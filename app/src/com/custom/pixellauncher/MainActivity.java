@@ -49,6 +49,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
@@ -221,6 +222,10 @@ public class MainActivity extends Activity {
     private float startX = 0;
     private boolean isTrackingSwipe = false;
 
+    // Navigation bar insets & bottom dock
+    private LinearLayout bottomDockContainer;
+    private int currentNavBarHeight = 0;
+
     // Touch & Drag state (Lawnchair DragLayer)
     private FrameLayout dragOverlay;
     private ImageView ivFloatingDrag;
@@ -327,6 +332,7 @@ public class MainActivity extends Activity {
         currentGridMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(PREF_KEY_GRID_MODE, GRID_MODE_4X5);
 
         initViews();
+        setupWindowInsets();
         setupGestures();
         setupAtAGlance();
         setupSearchPill();
@@ -344,6 +350,8 @@ public class MainActivity extends Activity {
         gvApps = findViewById(R.id.gv_apps);
         etDrawerSearch = findViewById(R.id.et_drawer_search);
         tvDate = findViewById(R.id.tv_date);
+
+        bottomDockContainer = findViewById(R.id.bottom_dock_container);
 
         dragOverlay = findViewById(R.id.drag_overlay);
         ivFloatingDrag = findViewById(R.id.iv_floating_drag);
@@ -396,14 +404,105 @@ public class MainActivity extends Activity {
         return dm.heightPixels > 0 ? dm.heightPixels : 2400;
     }
 
+    private void setupWindowInsets() {
+        if (rootLayout == null) return;
+
+        currentNavBarHeight = getNavigationBarHeight();
+        applyNavBarInsets(currentNavBarHeight);
+
+        rootLayout.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override
+            public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+                int navBarHeight = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        navBarHeight = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+                    } catch (Throwable t) {
+                        navBarHeight = insets.getSystemWindowInsetBottom();
+                    }
+                } else {
+                    navBarHeight = insets.getSystemWindowInsetBottom();
+                }
+
+                if (navBarHeight > 0 || currentNavBarHeight != navBarHeight) {
+                    currentNavBarHeight = navBarHeight;
+                    applyNavBarInsets(currentNavBarHeight);
+                }
+                return insets;
+            }
+        });
+        rootLayout.requestApplyInsets();
+    }
+
+    private int getNavigationBarHeight() {
+        int navBarHeight = 0;
+        int resourceId = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+        if (resourceId > 0) {
+            navBarHeight = getResources().getDimensionPixelSize(resourceId);
+        }
+        return navBarHeight;
+    }
+
+    private void applyNavBarInsets(int navBarHeight) {
+        final int density = (int) getResources().getDisplayMetrics().density;
+        final int safeBottom = (navBarHeight > 0) ? navBarHeight : 0;
+
+        // Lift bottom dock container above 3-button navigation bar
+        if (bottomDockContainer != null) {
+            bottomDockContainer.setPadding(
+                16 * density,
+                0,
+                16 * density,
+                safeBottom + (14 * density)
+            );
+        }
+
+        // Lift app drawer grid so the last row (e.g. YT Music) scrolls fully into clear view
+        if (gvApps != null) {
+            gvApps.setPadding(
+                4 * density,
+                4 * density,
+                4 * density,
+                safeBottom + (28 * density)
+            );
+            gvApps.setClipToPadding(false);
+        }
+
+        // Re-adjust grid heights across home pages
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                recalculateHomeGridHeights();
+            }
+        });
+    }
+
+    private void recalculateHomeGridHeights() {
+        final int density = (int) getResources().getDisplayMetrics().density;
+        for (int i = 0; i < pageGridViews.size() && i < pageAdapters.size(); i++) {
+            final GridView gv = pageGridViews.get(i);
+            final HomeItemAdapter adapter = pageAdapters.get(i);
+            if (gv != null && adapter != null) {
+                int gvH = gv.getHeight() - gv.getPaddingTop() - gv.getPaddingBottom();
+                int rows = getGridRows();
+                int vSpacing = (int) ((currentGridMode == GRID_MODE_16X9 ? 2 : 8) * density);
+                int availH = gvH - ((rows - 1) * vSpacing);
+                if (availH > 0) {
+                    adapter.setCellHeight(availH / rows);
+                }
+            }
+        }
+    }
+
     private int calculateCellHeight() {
         int screenH = getScreenHeight();
         float density = getResources().getDisplayMetrics().density;
-        int usedH = (int) ((110 + 150 + 32 + 8) * density);
+        int navH = currentNavBarHeight > 0 ? currentNavBarHeight : getNavigationBarHeight();
+        int usedH = (int) ((76 + 132 + 16 + 14) * density) + navH;
         int availH = screenH - usedH;
         int rows = getGridRows();
         int cellH = availH / rows;
-        int minH = (rows > 10) ? (int) (38 * density) : (int) (80 * density);
+        int minH = (rows > 10) ? (int) (38 * density) : (int) (84 * density);
         if (cellH < minH) {
             cellH = minH;
         }
@@ -3468,6 +3567,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         setupAtAGlance();
+        if (rootLayout != null) {
+            rootLayout.requestApplyInsets();
+        }
     }
 
     @Override

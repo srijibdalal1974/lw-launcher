@@ -99,8 +99,8 @@ public class HomeItemAdapter extends BaseAdapter {
         int iconSize;
         float textSize;
         if (gridColumns == 4) {
-            iconSize = (int) (58 * density);
-            textSize = 12.5f;
+            iconSize = (int) (50 * density);
+            textSize = 12.0f;
         } else if (gridColumns == 5) {
             iconSize = (int) (50 * density);
             textSize = 11.0f;
