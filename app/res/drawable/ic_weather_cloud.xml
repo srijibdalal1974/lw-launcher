@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+    <!-- Stylized Cloud Outline with Raindrop -->
+    <path
+        android:strokeColor="#FF82D3E5"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M11,24h15a6,6 0 0,0 0,-12 8,8 0 0,0 -15.5,2.5A5.5,5.5 0 0,0 11,24z" />
+    <path
+        android:fillColor="#FF82D3E5"
+        android:pathData="M16.5,27a1.5,1.5 0 0,0 3,0c0,-1.5 -1.5,-3 -1.5,-3s-1.5,1.5 -1.5,3z" />
+</vector>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="search_bar_bg">#F2FFFFFF</color>
+    <color name="search_bar_stroke">#33000000</color>
+    <color name="search_text_color">#5F6368</color>
+    <color name="drawer_bg">#F7121216</color>
+    <color name="drawer_search_bg">#26FFFFFF</color>
+    <color name="text_primary_white">#FFFFFFFF</color>
+    <color name="text_secondary_white">#B3FFFFFF</color>
+    <color name="at_a_glance_text">#FFFFFFFF</color>
+    <color name="dock_bg">#26FFFFFF</color>
+    <color name="google_blue">#4285F4</color>
+    <color name="google_red">#EA4335</color>
+    <color name="google_yellow">#FBBC05</color>
+    <color name="google_green">#34A853</color>
+</resources>

@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="22"
+    android:viewportHeight="22">
+    <!-- Smartphone Device Icon -->
+    <path
+        android:strokeColor="#FF80DEEA"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6,3 h10 a2,2 0 0,1 2,2 v12 a2,2 0 0,1 -2,2 h-10 a2,2 0 0,1 -2,-2 v-12 a2,2 0 0,1 2,-2 z" />
+    <path
+        android:fillColor="#FF80DEEA"
+        android:pathData="M11,16 a1,1 0 1,0 0.001,0 z" />
+</vector>

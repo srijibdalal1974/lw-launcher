@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="22"
+    android:viewportHeight="22">
+    <!-- Video Camera Icon -->
+    <path
+        android:strokeColor="#FF82D3E5"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3,6 h10 a3,3 0 0,1 3,3 v4 a3,3 0 0,1 -3,3 h-10 a3,3 0 0,1 -3,-3 v-4 a3,3 0 0,1 3,-3 z" />
+    <path
+        android:fillColor="#FF82D3E5"
+        android:pathData="M16,9.5 l4,-2.5 v8 l-4,-2.5 z" />
+</vector>

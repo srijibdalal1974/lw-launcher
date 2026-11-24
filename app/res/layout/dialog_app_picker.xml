@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="320dp"
+    android:layout_height="460dp"
+    android:background="@drawable/popup_menu_bg"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:elevation="24dp">
+
+    <TextView
+        android:id="@+id/picker_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Choose Dock App"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
+        android:layout_marginBottom="12dp" />
+
+    <EditText
+        android:id="@+id/picker_search"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:background="@drawable/search_bar_bg"
+        android:hint="Search apps..."
+        android:textColorHint="#88FFFFFF"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:singleLine="true"
+        android:layout_marginBottom="12dp" />
+
+    <GridView
+        android:id="@+id/picker_grid"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:numColumns="4"
+        android:verticalSpacing="12dp"
+        android:horizontalSpacing="4dp"
+        android:gravity="center"
+        android:stretchMode="columnWidth" />
+</LinearLayout>

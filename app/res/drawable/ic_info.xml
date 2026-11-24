@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Smooth circular outline -->
+    <path
+        android:strokeColor="#E6FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,2 C6.48,2 2,6.48 2,12 C2,17.52 6.48,22 12,22 C17.52,22 22,17.52 22,12 C22,6.48 17.52,2 12,2 Z" />
+    <!-- Round circular dot for 'i' -->
+    <path
+        android:fillColor="#E6FFFFFF"
+        android:pathData="M12,8.2 C12.66,8.2 13.2,7.66 13.2,7 C13.2,6.34 12.66,5.8 12,5.8 C11.34,5.8 10.8,6.34 10.8,7 C10.8,7.66 11.34,8.2 12,8.2 Z" />
+    <!-- Rounded stem for 'i' -->
+    <path
+        android:strokeColor="#E6FFFFFF"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:pathData="M12,11 L12,17" />
+</vector>

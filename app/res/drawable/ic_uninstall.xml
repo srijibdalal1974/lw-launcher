@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Android 17 Curved Floating Top Handle -->
+    <path
+        android:strokeColor="#FF5252"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M10,4.5 C10,3.7 10.7,3 11.5,3 L12.5,3 C13.3,3 14,3.7 14,4.5" />
+    <!-- Curved Floating Lid Bar -->
+    <path
+        android:strokeColor="#FF5252"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:pathData="M5,6.5 L19,6.5" />
+    <!-- Smooth Tapered Body with Rounded Base -->
+    <path
+        android:strokeColor="#FF5252"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6.5,9.5 L7.8,18.2 C8.0,19.8 9.3,21 10.9,21 L13.1,21 C14.7,21 16.0,19.8 16.2,18.2 L17.5,9.5 Z" />
+    <!-- Smooth Rounded Interior Slats -->
+    <path
+        android:strokeColor="#FF5252"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M10.2,12.5 L10.5,17.5 M13.8,12.5 L13.5,17.5" />
+</vector>

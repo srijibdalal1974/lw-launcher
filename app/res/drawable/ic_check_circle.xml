@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="28"
+    android:viewportHeight="28">
+    <!-- Blue circle checkmark badge -->
+    <path
+        android:fillColor="#FF387BFF"
+        android:pathData="M14,0 C6.27,0 0,6.27 0,14 C0,21.73 6.27,28 14,28 C21.73,28 28,21.73 28,14 C28,6.27 21.73,0 14,0 Z"/>
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M8.5,14.5 L12,18 L19.5,10.5"/>
+</vector>

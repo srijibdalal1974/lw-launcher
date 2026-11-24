@@ -1,0 +1,19 @@
+# Build tools & SDK binaries (keep repo lightweight)
+tools/
+
+# Build outputs
+build/
+
+# Temporary and test artifacts
+*.log
+*.tmp
+.idea/
+.gradle/
+local.properties
+capture_drag*.bat
+test_drag.bat
+dump_local.xml
+launcher_screen.png
+init_repo.bat
+setup_git.bat
+setup_gh.bat

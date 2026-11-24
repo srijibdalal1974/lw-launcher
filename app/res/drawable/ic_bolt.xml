@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="20"
+    android:viewportHeight="20">
+    <!-- Lightning Bolt Badge -->
+    <path
+        android:fillColor="#FF4DD0E1"
+        android:pathData="M10,0 a10,10 0 1,0 0.001,0 z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M11,4 L6,11 L10,11 L9,16 L14,9 L10,9 Z" />
+</vector>

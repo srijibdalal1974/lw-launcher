@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="20"
+    android:viewportHeight="20">
+    <!-- Gemini Sparkle Star -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10,0 C10,5.52 14.48,10 20,10 C14.48,10 10,14.48 10,20 C10,14.48 5.52,10 0,10 C5.52,10 10,5.52 10,0 Z" />
+</vector>
