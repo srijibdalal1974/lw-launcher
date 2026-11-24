@@ -5,13 +5,13 @@
 </p>
 
 <p align="center">
-  <b>An ultra-lightweight, high-performance Android 11–17 home launcher with built-in gesture navigation and an Android 17 style recents multi-task switcher.</b>
+  <b>An ultra-lightweight, high-performance Android 11–17 home launcher with Lawnchair-style 60fps drag-and-drop, folder merging, and Material You design.</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Android_11--17-brightgreen.svg" />
   <img src="https://img.shields.io/badge/Language-Pure_Java-orange.svg" />
-  <img src="https://img.shields.io/badge/APK_Size-~120_KB-blue.svg" />
+  <img src="https://img.shields.io/badge/APK_Size-~108_KB-blue.svg" />
   <img src="https://img.shields.io/badge/License-Apache_2.0-lightgrey.svg" />
 </p>
 
@@ -19,13 +19,7 @@
 
 ## Highlights
 
-- 🪶 **Ultra Lightweight (~120 KB APK)**: Zero Gradle bloat, zero heavy third-party dependencies. Compiles directly using pure Java SDK, AAPT2, and D8.
-- ⚡ **Android 17 Gesture Navigation & Recents Switcher**:
-  - Built-in bottom gesture navigation bar with high-elevation pill.
-  - Upward swipe from bottom triggers the Android 17 squircle card carousel switcher.
-  - **Swipe Up to Close**: Fling individual app cards upward to terminate background processes (`killBackgroundProcesses`) with haptic feedback.
-  - **Clear All**: One-tap pill to close all background apps and return smoothly to home.
-  - Solves the common ColorOS/Realme UI issue where disabling stock launcher breaks `OverviewProxyService`.
+- 🪶 **Ultra Lightweight (~108 KB APK)**: Zero Gradle bloat, zero heavy third-party dependencies. Compiles directly using pure Java SDK, AAPT2, and D8.
 - 🎯 **Lawnchair-Style DragLayer (60fps Touch Dragging)**:
   - Real-time elevated floating icon (`1.15x` scale) tracking your finger.
   - Android 17 top drop targets: 🗑️ **Remove from Home** and 🗑️ **Uninstall** with stylized vector trash cans and spring glow animations.
@@ -39,7 +33,7 @@
   - **16 × 9 (Android Power Grid)**: Ultra-dense 144-slot grid with 32dp icons for power users.
 - 🎨 **Material You Expressive Design**:
   - 28dp squircle curvature across popups and cards with frosted glass backdrops.
-  - Clean edge-to-edge transparent status and navigation bars.
+  - Clean edge-to-edge transparent status and navigation bars compatible with native system navigation.
   - Integrated `AppWidgetHost` for native Google Search widgets and app widgets.
 
 ---
@@ -51,11 +45,11 @@
 │   ├── AndroidManifest.xml          # Package, permissions, and HOME intent-filters
 │   ├── res/                         # Vector drawables, layouts, and styles
 │   │   ├── drawable/                # Modern Android 17 squircles & vector icons
-│   │   ├── layout/                  # Activity launcher & recents layouts
+│   │   ├── layout/                  # Activity launcher layout
 │   │   └── values/                  # Strings, colors, and themes
 │   └── src/
 │       └── com/custom/pixellauncher/
-│           ├── MainActivity.java    # Core launcher, gestures, recents, drag engine
+│           ├── MainActivity.java    # Core launcher, gestures, and drag engine
 │           ├── AppInfo.java         # App metadata model
 │           ├── AppAdapter.java      # App drawer grid adapter with filtering
 │           └── LauncherItem.java    # Desktop grid & folder item state

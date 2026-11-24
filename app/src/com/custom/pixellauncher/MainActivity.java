@@ -220,21 +220,6 @@ public class MainActivity extends Activity {
     private float startY = 0;
     private float startX = 0;
     private boolean isTrackingSwipe = false;
-    private boolean isBottomGestureStart = false;
-
-    // Android 17 Recents & Gesture Switcher
-    private FrameLayout recentsOverlay;
-    private FrameLayout navGesturePillContainer;
-    private View navGesturePill;
-    private View recentsBottomDismissPill;
-    private LinearLayout recentsCardsContainer;
-    private HorizontalScrollView recentsHsv;
-    private TextView tvRecentsCountBadge;
-    private LinearLayout recentsEmptyView;
-    private LinearLayout btnRecentsClearAll;
-    private boolean isRecentsOpen = false;
-    private final List<String> recentPackagesList = new ArrayList<>();
-    private static final String PREF_KEY_RECENTS = "pref_recents_history_v2";
 
     // Touch & Drag state (Lawnchair DragLayer)
     private FrameLayout dragOverlay;
@@ -348,7 +333,6 @@ public class MainActivity extends Activity {
         setupDock();
         setupDrawer();
         setupCustomizationPanel();
-        setupRecents();
 
         loadInstalledApps();
     }
@@ -370,16 +354,6 @@ public class MainActivity extends Activity {
         hsvHomePages = findViewById(R.id.hsv_home_pages);
         llHomePages = findViewById(R.id.ll_home_pages);
         layoutPageDots = findViewById(R.id.layout_page_dots);
-
-        recentsOverlay = findViewById(R.id.recents_overlay);
-        navGesturePillContainer = findViewById(R.id.nav_gesture_pill_container);
-        navGesturePill = findViewById(R.id.nav_gesture_pill);
-        recentsBottomDismissPill = findViewById(R.id.recents_bottom_dismiss_pill);
-        recentsCardsContainer = findViewById(R.id.recents_cards_container);
-        recentsHsv = findViewById(R.id.recents_hsv);
-        tvRecentsCountBadge = findViewById(R.id.tv_recents_count_badge);
-        recentsEmptyView = findViewById(R.id.recents_empty_view);
-        btnRecentsClearAll = findViewById(R.id.btn_recents_clear_all);
 
         hsvHomePages.setClipChildren(false);
         hsvHomePages.setClipToPadding(false);
@@ -1918,18 +1892,11 @@ public class MainActivity extends Activity {
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
                 if (e1 == null || e2 == null) return false;
-                if (isRecentsOpen) return false;
                 float dy = e2.getY() - e1.getY();
                 float dx = e2.getX() - e1.getX();
 
                 if (Math.abs(dy) > Math.abs(dx) * 1.2f && Math.abs(dy) > SWIPE_MIN_DISTANCE && Math.abs(velocityY) > SWIPE_THRESHOLD_VELOCITY) {
                     if (dy < 0) {
-                        int screenH = getScreenHeight();
-                        float density = getResources().getDisplayMetrics().density;
-                        if (e1.getY() > screenH - (130 * density)) {
-                            openRecents();
-                            return true;
-                        }
                         if (appDrawer.getVisibility() != View.VISIBLE) {
                             openAppDrawer();
                             return true;
@@ -1959,10 +1926,6 @@ public class MainActivity extends Activity {
             return true;
         }
 
-        if (isRecentsOpen) {
-            return super.dispatchTouchEvent(ev);
-        }
-
         if (gestureDetector != null && gestureDetector.onTouchEvent(ev)) {
             return true;
         }
@@ -1972,9 +1935,6 @@ public class MainActivity extends Activity {
                 startY = ev.getY();
                 startX = ev.getX();
                 isTrackingSwipe = true;
-                int screenH = getScreenHeight();
-                float density = getResources().getDisplayMetrics().density;
-                isBottomGestureStart = (startY > screenH - (130 * density));
                 break;
 
             case MotionEvent.ACTION_MOVE:
@@ -1991,12 +1951,6 @@ public class MainActivity extends Activity {
                     float totalDx = ev.getX() - startX;
                     if (Math.abs(totalDy) > Math.abs(totalDx) * 1.3f && Math.abs(totalDy) > 70) {
                         if (totalDy < 0) {
-                            if (isBottomGestureStart) {
-                                openRecents();
-                                isTrackingSwipe = false;
-                                isBottomGestureStart = false;
-                                return true;
-                            }
                             if (appDrawer.getVisibility() != View.VISIBLE) {
                                 openAppDrawer();
                                 isTrackingSwipe = false;
@@ -2014,12 +1968,10 @@ public class MainActivity extends Activity {
                     }
                 }
                 isTrackingSwipe = false;
-                isBottomGestureStart = false;
                 break;
 
             case MotionEvent.ACTION_CANCEL:
                 isTrackingSwipe = false;
-                isBottomGestureStart = false;
                 break;
         }
 
@@ -3379,7 +3331,6 @@ public class MainActivity extends Activity {
             intent.setComponent(new ComponentName(app.packageName, app.activityName));
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             startActivity(intent);
-            recordAppLaunch(app.packageName);
             closeAppDrawer();
         } catch (Exception e) {
             Toast.makeText(this, "Could not open " + app.label, Toast.LENGTH_SHORT).show();
@@ -3421,7 +3372,6 @@ public class MainActivity extends Activity {
                         loadPages();
                         loadDockApps();
                         renderDock();
-                        loadRecentsHistory();
                     }
                 });
             }
@@ -3505,10 +3455,6 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (isRecentsOpen) {
-            closeRecents();
-            return;
-        }
         if (customizationPanelOverlay != null && customizationPanelOverlay.getVisibility() == View.VISIBLE) {
             hideCustomizationPanel();
             return;
@@ -3516,19 +3462,6 @@ public class MainActivity extends Activity {
         if (appDrawer.getVisibility() == View.VISIBLE) {
             closeAppDrawer();
         }
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_APP_SWITCH) {
-            if (isRecentsOpen) {
-                closeRecents();
-            } else {
-                openRecents();
-            }
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
     }
 
     @Override
@@ -3555,423 +3488,6 @@ public class MainActivity extends Activity {
                 appWidgetHost.stopListening();
             } catch (Exception ignored) {}
         }
-    }
-
-    // =========================================================================
-    // ANDROID 17 RECENTS / APP SWITCHER / GESTURE NAVIGATION
-    // =========================================================================
-
-    private void setupRecents() {
-        if (recentsOverlay == null) return;
-
-        loadRecentsHistory();
-
-        // Dismiss recents if background scrim or bottom pill is tapped
-        recentsOverlay.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                closeRecents();
-            }
-        });
-
-        if (recentsBottomDismissPill != null) {
-            recentsBottomDismissPill.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    closeRecents();
-                }
-            });
-        }
-
-        if (btnRecentsClearAll != null) {
-            btnRecentsClearAll.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    clearAllRecents();
-                }
-            });
-        }
-
-        // Bottom gesture nav pill triggers recents
-        if (navGesturePillContainer != null) {
-            navGesturePillContainer.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    openRecents();
-                }
-            });
-
-            navGesturePillContainer.setOnTouchListener(new View.OnTouchListener() {
-                float pillStartY = 0;
-                float pillStartX = 0;
-
-                @Override
-                public boolean onTouch(View v, MotionEvent event) {
-                    switch (event.getAction()) {
-                        case MotionEvent.ACTION_DOWN:
-                            pillStartY = event.getY();
-                            pillStartX = event.getX();
-                            break;
-                        case MotionEvent.ACTION_UP:
-                            float dy = event.getY() - pillStartY;
-                            float dx = event.getX() - pillStartX;
-                            if (dy < -20 || (Math.abs(dx) < 40 && Math.abs(dy) < 40)) {
-                                openRecents();
-                                return true;
-                            }
-                            break;
-                    }
-                    return false;
-                }
-            });
-        }
-    }
-
-    private void loadRecentsHistory() {
-        recentPackagesList.clear();
-        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String saved = sp.getString(PREF_KEY_RECENTS, "");
-        if (!saved.isEmpty()) {
-            String[] parts = saved.split(",");
-            for (String p : parts) {
-                String trimmed = p.trim();
-                if (!trimmed.isEmpty() && !trimmed.equals(getPackageName())) {
-                    if (!recentPackagesList.contains(trimmed)) {
-                        recentPackagesList.add(trimmed);
-                    }
-                }
-            }
-        }
-
-        // Query active running processes from ActivityManager
-        try {
-            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-                if (procs != null) {
-                    for (ActivityManager.RunningAppProcessInfo proc : procs) {
-                        if (proc.pkgList != null) {
-                            for (String pkg : proc.pkgList) {
-                                if (pkg != null && !pkg.equals(getPackageName()) && findAppByPkg(pkg) != null) {
-                                    if (!recentPackagesList.contains(pkg)) {
-                                        recentPackagesList.add(pkg);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-
-        // If list is small, seed with installed apps so the user immediately has switcher cards
-        if (recentPackagesList.size() < 5 && !appList.isEmpty()) {
-            for (AppInfo a : appList) {
-                if (!a.packageName.equals(getPackageName()) && !recentPackagesList.contains(a.packageName)) {
-                    recentPackagesList.add(a.packageName);
-                    if (recentPackagesList.size() >= 8) break;
-                }
-            }
-        }
-    }
-
-    private void saveRecentsHistory() {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < recentPackagesList.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append(recentPackagesList.get(i));
-        }
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .edit()
-            .putString(PREF_KEY_RECENTS, sb.toString())
-            .apply();
-    }
-
-    private void recordAppLaunch(String packageName) {
-        if (packageName == null || packageName.equals(getPackageName())) return;
-        recentPackagesList.remove(packageName);
-        recentPackagesList.add(0, packageName);
-        while (recentPackagesList.size() > 25) {
-            recentPackagesList.remove(recentPackagesList.size() - 1);
-        }
-        saveRecentsHistory();
-    }
-
-    public void openRecents() {
-        if (isRecentsOpen) return;
-        if (appDrawer != null && appDrawer.getVisibility() == View.VISIBLE) {
-            closeAppDrawer();
-        }
-        if (customizationPanelOverlay != null && customizationPanelOverlay.getVisibility() == View.VISIBLE) {
-            hideCustomizationPanel();
-        }
-
-        isRecentsOpen = true;
-        loadRecentsHistory();
-        populateRecentsCards();
-
-        if (recentsOverlay != null) {
-            recentsOverlay.setVisibility(View.VISIBLE);
-            recentsOverlay.setAlpha(0f);
-            recentsOverlay.animate().alpha(1f).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();
-        }
-
-        if (recentsHsv != null) {
-            recentsHsv.scrollTo(0, 0);
-            recentsHsv.setTranslationY(100f);
-            recentsHsv.animate().translationY(0f).setDuration(260).setInterpolator(new DecelerateInterpolator()).start();
-        }
-
-        try {
-            if (rootLayout != null) {
-                rootLayout.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-            }
-        } catch (Exception ignored) {}
-    }
-
-    public void closeRecents() {
-        if (!isRecentsOpen || recentsOverlay == null) return;
-        isRecentsOpen = false;
-        recentsOverlay.animate().alpha(0f).setDuration(180).setInterpolator(new AccelerateInterpolator()).withEndAction(new Runnable() {
-            @Override
-            public void run() {
-                if (recentsOverlay != null) {
-                    recentsOverlay.setVisibility(View.GONE);
-                }
-            }
-        }).start();
-    }
-
-    private void populateRecentsCards() {
-        if (recentsCardsContainer == null) return;
-        recentsCardsContainer.removeAllViews();
-
-        List<AppInfo> validApps = new ArrayList<>();
-        for (String pkg : recentPackagesList) {
-            AppInfo app = findAppByPkg(pkg);
-            if (app != null) {
-                validApps.add(app);
-            }
-        }
-
-        if (validApps.isEmpty()) {
-            if (recentsEmptyView != null) recentsEmptyView.setVisibility(View.VISIBLE);
-            if (recentsHsv != null) recentsHsv.setVisibility(View.GONE);
-            if (tvRecentsCountBadge != null) tvRecentsCountBadge.setText("0 Active");
-            return;
-        }
-
-        if (recentsEmptyView != null) recentsEmptyView.setVisibility(View.GONE);
-        if (recentsHsv != null) recentsHsv.setVisibility(View.VISIBLE);
-        if (tvRecentsCountBadge != null) tvRecentsCountBadge.setText(validApps.size() + " Active");
-
-        LayoutInflater inflater = LayoutInflater.from(this);
-        for (final AppInfo app : validApps) {
-            final View cardView = inflater.inflate(R.layout.item_recent_app, recentsCardsContainer, false);
-
-            ImageView ivIcon = cardView.findViewById(R.id.iv_recent_icon);
-            ImageView ivLargeIcon = cardView.findViewById(R.id.iv_recent_large_icon);
-            TextView tvTitle = cardView.findViewById(R.id.tv_recent_title);
-            TextView tvPkg = cardView.findViewById(R.id.tv_recent_pkg);
-            View btnOpen = cardView.findViewById(R.id.btn_recent_open);
-            View btnInfo = cardView.findViewById(R.id.btn_recent_info);
-            View btnClose = cardView.findViewById(R.id.btn_recent_close_card);
-
-            if (ivIcon != null && app.icon != null) ivIcon.setImageDrawable(app.icon);
-            if (ivLargeIcon != null && app.icon != null) ivLargeIcon.setImageDrawable(app.icon);
-            if (tvTitle != null) tvTitle.setText(app.label);
-            if (tvPkg != null) tvPkg.setText(app.packageName);
-
-            // Tapping card or Open button switches to the app
-            View.OnClickListener launchClick = new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    closeRecents();
-                    launchApp(app);
-                }
-            };
-            cardView.setOnClickListener(launchClick);
-            if (btnOpen != null) btnOpen.setOnClickListener(launchClick);
-
-            // App info button
-            if (btnInfo != null) {
-                btnInfo.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        try {
-                            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                            intent.setData(Uri.parse("package:" + app.packageName));
-                            startActivity(intent);
-                        } catch (Exception e) {
-                            Toast.makeText(MainActivity.this, "Could not open app settings", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                });
-            }
-
-            // Close button on card header
-            if (btnClose != null) {
-                btnClose.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        dismissCard(cardView, app);
-                    }
-                });
-            }
-
-            // Swipe Up gesture to close the app
-            cardView.setOnTouchListener(new View.OnTouchListener() {
-                float dragStartY = 0;
-                float dragStartX = 0;
-                boolean isSwipingUp = false;
-
-                @Override
-                public boolean onTouch(View v, MotionEvent event) {
-                    switch (event.getAction()) {
-                        case MotionEvent.ACTION_DOWN:
-                            dragStartY = event.getRawY();
-                            dragStartX = event.getRawX();
-                            isSwipingUp = false;
-                            break;
-
-                        case MotionEvent.ACTION_MOVE:
-                            float dy = event.getRawY() - dragStartY;
-                            float dx = event.getRawX() - dragStartX;
-                            if (!isSwipingUp && Math.abs(dy) > Math.abs(dx) * 1.2f && dy < -25) {
-                                isSwipingUp = true;
-                                if (recentsHsv != null) {
-                                    recentsHsv.requestDisallowInterceptTouchEvent(true);
-                                }
-                            }
-                            if (isSwipingUp) {
-                                if (dy < 0) {
-                                    v.setTranslationY(dy);
-                                    float alpha = Math.max(0.2f, 1f - (Math.abs(dy) / 600f));
-                                    v.setAlpha(alpha);
-                                } else {
-                                    v.setTranslationY(0);
-                                    v.setAlpha(1f);
-                                }
-                                return true;
-                            }
-                            break;
-
-                        case MotionEvent.ACTION_UP:
-                        case MotionEvent.ACTION_CANCEL:
-                            if (isSwipingUp) {
-                                float totalDy = event.getRawY() - dragStartY;
-                                if (recentsHsv != null) {
-                                    recentsHsv.requestDisallowInterceptTouchEvent(false);
-                                }
-                                if (totalDy < -160) {
-                                    dismissCard(v, app);
-                                } else {
-                                    v.animate().translationY(0f).alpha(1f).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();
-                                }
-                                return true;
-                            }
-                            break;
-                    }
-                    return false;
-                }
-            });
-
-            recentsCardsContainer.addView(cardView);
-        }
-    }
-
-    private void dismissCard(final View cardView, final AppInfo app) {
-        try {
-            cardView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-        } catch (Exception ignored) {}
-
-        cardView.animate()
-            .translationY(-1400f)
-            .alpha(0f)
-            .setDuration(240)
-            .setInterpolator(new AccelerateInterpolator())
-            .withEndAction(new Runnable() {
-                @Override
-                public void run() {
-                    if (recentsCardsContainer != null) {
-                        recentsCardsContainer.removeView(cardView);
-                    }
-                    recentPackagesList.remove(app.packageName);
-                    saveRecentsHistory();
-
-                    // Kill background processes
-                    try {
-                        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-                        if (am != null) {
-                            am.killBackgroundProcesses(app.packageName);
-                        }
-                    } catch (Exception ignored) {}
-
-                    int remaining = recentsCardsContainer != null ? recentsCardsContainer.getChildCount() : 0;
-                    if (tvRecentsCountBadge != null) {
-                        tvRecentsCountBadge.setText(remaining + " Active");
-                    }
-                    if (remaining == 0) {
-                        if (recentsEmptyView != null) recentsEmptyView.setVisibility(View.VISIBLE);
-                        if (recentsHsv != null) recentsHsv.setVisibility(View.GONE);
-                    }
-
-                    Toast.makeText(MainActivity.this, app.label + " closed", Toast.LENGTH_SHORT).show();
-                }
-            }).start();
-    }
-
-    private void clearAllRecents() {
-        if (recentsCardsContainer == null || recentsCardsContainer.getChildCount() == 0) return;
-
-        try {
-            if (rootLayout != null) {
-                rootLayout.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            }
-        } catch (Exception ignored) {}
-
-        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-        for (String pkg : recentPackagesList) {
-            try {
-                if (am != null) am.killBackgroundProcesses(pkg);
-            } catch (Exception ignored) {}
-        }
-
-        int count = recentsCardsContainer.getChildCount();
-        for (int i = 0; i < count; i++) {
-            View child = recentsCardsContainer.getChildAt(i);
-            if (child != null) {
-                child.animate()
-                    .translationY(-1400f)
-                    .alpha(0f)
-                    .setDuration(220 + (i * 30))
-                    .setInterpolator(new AccelerateInterpolator())
-                    .start();
-            }
-        }
-
-        recentPackagesList.clear();
-        saveRecentsHistory();
-
-        mainHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (recentsCardsContainer != null) {
-                    recentsCardsContainer.removeAllViews();
-                }
-                if (tvRecentsCountBadge != null) {
-                    tvRecentsCountBadge.setText("0 Active");
-                }
-                if (recentsEmptyView != null) {
-                    recentsEmptyView.setVisibility(View.VISIBLE);
-                }
-                if (recentsHsv != null) {
-                    recentsHsv.setVisibility(View.GONE);
-                }
-                Toast.makeText(MainActivity.this, "All background apps closed", Toast.LENGTH_SHORT).show();
-                closeRecents();
-            }
-        }, 280);
     }
 
     @Override
