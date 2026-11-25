@@ -5,9 +5,6 @@
   <!-- SUBTLE INNER BORDER RING -->
   <path fill="none" stroke="#24344D" stroke-width="1.5" d="M54,11 C77.8,11 97,30.2 97,54 C97,77.8 77.8,97 54,97 C30.2,97 11,77.8 11,54 C11,30.2 30.2,11 54,11 Z" />
 
-  <!-- AMBIENT ACCENT GLOW BACKDROP -->
-  <path fill="rgba(56, 189, 248, 0.102)" d="M54,26 C69.5,26 82,38.5 82,54 C82,69.5 69.5,82 54,82 C38.5,82 26,69.5 26,54 C26,38.5 38.5,26 54,26 Z" />
-
   <!-- "L" RIBBON (LIGHTWEIGHT) - ELECTRIC CYAN -->
   <path fill="none" stroke="#00E5FF" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" d="M30,34 L30,72 C30,74.5 32,76 35,76 L48,76" />
 
