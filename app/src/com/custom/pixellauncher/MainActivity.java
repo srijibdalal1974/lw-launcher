@@ -340,6 +340,8 @@ public class MainActivity extends Activity {
         setupDrawer();
         setupCustomizationPanel();
 
+        checkFirstRunRolePrompt();
+
         loadInstalledApps();
     }
 
@@ -2262,10 +2264,69 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int REQUEST_CODE_ROLE_HOME = 1099;
+
+    public boolean isDefaultHome() {
+        try {
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+            homeIntent.addCategory(Intent.CATEGORY_HOME);
+            ResolveInfo resolveInfo = getPackageManager().resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (resolveInfo != null && resolveInfo.activityInfo != null) {
+                return getPackageName().equals(resolveInfo.activityInfo.packageName);
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    public void requestDefaultHomeRole() {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.app.role.RoleManager roleManager = (android.app.role.RoleManager) getSystemService(Context.ROLE_SERVICE);
+                if (roleManager != null && roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)) {
+                    if (!roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
+                        Intent roleIntent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME);
+                        startActivityForResult(roleIntent, REQUEST_CODE_ROLE_HOME);
+                        return;
+                    } else {
+                        Toast.makeText(this, "LW Launcher is already your default launcher!", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
+            }
+            Intent intent = new Intent(Settings.ACTION_HOME_SETTINGS);
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                Intent fallback = new Intent(Settings.ACTION_SETTINGS);
+                startActivity(fallback);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void checkFirstRunRolePrompt() {
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            boolean prompted = prefs.getBoolean("pref_prompted_default_home", false);
+            if (!prompted && !isDefaultHome()) {
+                prefs.edit().putBoolean("pref_prompted_default_home", true).apply();
+                new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isFinishing() && !isDefaultHome()) {
+                            requestDefaultHomeRole();
+                        }
+                    }
+                }, 1000);
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void showHomeSettingsDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
-        builder.setTitle("Grid & Icon Size");
+        builder.setTitle("Launcher & Display Settings");
+        boolean isDefault = isDefaultHome();
         String[] options = new String[]{
+                "Set Default Home App (Launcher)" + (isDefault ? " [Active]" : " [Not Default]"),
                 "4 x 5 Pixel Standard (Large 58dp Icons)" + (currentGridMode == GRID_MODE_4X5 ? " (Active)" : ""),
                 "5 x 5 Pixel Expressive (Medium 50dp Icons)" + (currentGridMode == GRID_MODE_5X5 ? " (Active)" : ""),
                 "16 x 9 Ultra Dense (Compact 34dp Icons)" + (currentGridMode == GRID_MODE_16X9 ? " (Active)" : ""),
@@ -2275,12 +2336,14 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 if (which == 0) {
-                    setGridMode(GRID_MODE_4X5);
+                    requestDefaultHomeRole();
                 } else if (which == 1) {
-                    setGridMode(GRID_MODE_5X5);
+                    setGridMode(GRID_MODE_4X5);
                 } else if (which == 2) {
-                    setGridMode(GRID_MODE_16X9);
+                    setGridMode(GRID_MODE_5X5);
                 } else if (which == 3) {
+                    setGridMode(GRID_MODE_16X9);
+                } else if (which == 4) {
                     try {
                         Intent intent = new Intent(Settings.ACTION_SETTINGS);
                         startActivity(intent);
