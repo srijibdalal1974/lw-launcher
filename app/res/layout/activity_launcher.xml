@@ -12,7 +12,7 @@
         android:paddingTop="52dp"
         android:paddingBottom="24dp">
 
-        <!-- AT A GLANCE (TOP) -->
+        <!-- AT A GLANCE (LEGACY HIDDEN HEADER - CALENDAR NOW RENDERS ON UNIFIED GRID) -->
         <LinearLayout
             android:id="@+id/at_a_glance"
             android:layout_width="match_parent"
@@ -23,6 +23,7 @@
             android:paddingEnd="24dp"
             android:paddingTop="16dp"
             android:paddingBottom="8dp"
+            android:visibility="gone"
             android:clickable="true"
             android:focusable="true">
 
@@ -54,12 +55,25 @@
                 android:shadowRadius="3" />
         </LinearLayout>
 
-        <!-- HORIZONTAL MULTI-PAGE CONTAINER (5 PAGES) -->
-        <HorizontalScrollView
+        <!-- TOP SEARCH BAR CONTAINER (UP POSITION - HOLDS ORIGINAL GOOGLE WIDGET ONLY) -->
+        <FrameLayout
+            android:id="@+id/search_bar_top_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="4dp"
+            android:minHeight="54dp"
+            android:visibility="gone" />
+
+        <!-- HORIZONTAL MULTI-PAGE CONTAINER (DYNAMIC PAGES) -->
+        <com.custom.pixellauncher.SmoothHomePager
             android:id="@+id/hsv_home_pages"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_below="@id/at_a_glance"
+            android:layout_below="@id/search_bar_top_container"
             android:layout_above="@id/layout_page_dots"
             android:scrollbars="none"
             android:overScrollMode="never"
@@ -70,17 +84,17 @@
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
                 android:orientation="horizontal" />
-        </HorizontalScrollView>
+        </com.custom.pixellauncher.SmoothHomePager>
 
         <!-- DYNAMIC PAGE INDICATOR DOTS -->
         <LinearLayout
             android:id="@+id/layout_page_dots"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="20dp"
             android:layout_above="@id/bottom_dock_container"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingBottom="6dp" />
+            android:paddingBottom="4dp" />
 
         <!-- BOTTOM DOCK CONTAINER -->
         <LinearLayout

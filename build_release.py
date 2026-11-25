@@ -184,15 +184,20 @@ def main():
         "Verify Signed APK"
     )
 
-    # Produce v2 named assets
+    # Produce versioned assets
     aab_v2_path = os.path.join(release_dir, "LW_Launcher_v2.aab")
     apk_v2_path = os.path.join(release_dir, "LW_Launcher_v2.apk")
+    aab_v3_path = os.path.join(release_dir, "LW_Launcher_v3.aab")
+    apk_v3_path = os.path.join(release_dir, "LW_Launcher_v3.apk")
     shutil.copy2(aab_path, aab_v2_path)
     shutil.copy2(apk_path, apk_v2_path)
+    shutil.copy2(aab_path, aab_v3_path)
+    shutil.copy2(apk_path, apk_v3_path)
 
     # Deliver to Downloads directories
     download_dirs = [
         r"C:\Users\sriji\Downloads\LW_Launcher",
+        r"C:\Users\sriji\Downloads\LW_Launcher_v3",
         r"C:\Users\sriji\Downloads\LW_Launcher_v2",
         r"C:\Users\sriji\Downloads\lw laucher v2"
     ]
@@ -200,9 +205,9 @@ def main():
         os.makedirs(d, exist_ok=True)
         shutil.copy2(aab_path, os.path.join(d, "LW_Launcher.aab"))
         shutil.copy2(apk_path, os.path.join(d, "LW_Launcher.apk"))
-        shutil.copy2(aab_v2_path, os.path.join(d, "LW_Launcher_v2.aab"))
-        shutil.copy2(apk_v2_path, os.path.join(d, "LW_Launcher_v2.apk"))
-        print(f"[OK] Delivered v2 release assets to {d}")
+        shutil.copy2(aab_v3_path, os.path.join(d, "LW_Launcher_v3.aab"))
+        shutil.copy2(apk_v3_path, os.path.join(d, "LW_Launcher_v3.apk"))
+        print(f"[OK] Delivered v3 release assets to {d}")
 
     # Summary
     aab_size = os.path.getsize(aab_path)
