@@ -1,7 +1,7 @@
 # LW Launcher (Lightweight Launcher)
 
 <p align="center">
-  <img src="app/res/drawable/ic_launcher.xml" width="128" height="128" alt="LW Launcher Logo" />
+  <img src="assets/logo.png" width="128" height="128" alt="LW Launcher Logo" />
 </p>
 
 <p align="center">
