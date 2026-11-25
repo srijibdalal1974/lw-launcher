@@ -596,7 +596,7 @@ public class MainActivity extends Activity {
                         LauncherItem item = pageAdapters.get(pageIdx).getItem(position);
                         if (item != null) {
                             if (item.type == LauncherItem.TYPE_FOLDER) {
-                                showFolderPopup(item.folderInfo, pageIdx, position);
+                                showFolderPopup(view, item.folderInfo, pageIdx, position);
                             } else if (item.appInfo != null) {
                                 launchApp(item.appInfo);
                             }
@@ -1062,16 +1062,21 @@ public class MainActivity extends Activity {
         int pos = findItemPositionAt(gv, localX, localY, currPageList.size());
 
         if (pos >= 0 && pos < currPageList.size()) {
-            LauncherItem targetItem = currPageList.get(pos);
-            if (targetItem != null) {
-                boolean isSameItem = (currentPage == dragSourcePage && pos == dragSourcePosition);
-                if (!isSameItem) {
-                    int childIndex = pos - gv.getFirstVisiblePosition();
-                    View targetChild = gv.getChildAt(childIndex);
-                    if (targetChild != null && targetChild != currentHoverView) {
+            boolean isSameItem = (currentPage == dragSourcePage && pos == dragSourcePosition);
+            if (!isSameItem) {
+                int childIndex = pos - gv.getFirstVisiblePosition();
+                View targetChild = gv.getChildAt(childIndex);
+                if (targetChild != null) {
+                    if (targetChild != currentHoverView) {
                         clearHoverHighlight();
                         currentHoverView = targetChild;
-                        currentHoverView.animate().scaleX(1.18f).scaleY(1.18f).setDuration(120).start();
+                        LauncherItem targetItem = currPageList.get(pos);
+                        if (targetItem != null) {
+                            currentHoverView.animate().scaleX(1.15f).scaleY(1.15f).setDuration(120).start();
+                        } else {
+                            currentHoverView.setBackgroundResource(R.drawable.drop_target_bg);
+                            currentHoverView.animate().scaleX(1.05f).scaleY(1.05f).setDuration(120).start();
+                        }
                     }
                     return;
                 }
@@ -1082,6 +1087,7 @@ public class MainActivity extends Activity {
 
     private void clearHoverHighlight() {
         if (currentHoverView != null) {
+            currentHoverView.setBackground(null);
             currentHoverView.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start();
             currentHoverView = null;
         }
@@ -1759,7 +1765,7 @@ public class MainActivity extends Activity {
         animatePopIn(popupView);
     }
 
-    private void showFolderPopup(final FolderInfo folder, final int pageIdx, final int itemIdx) {
+    private void showFolderPopup(final View anchorView, final FolderInfo folder, final int pageIdx, final int itemIdx) {
         LayoutInflater inflater = LayoutInflater.from(this);
         final View dialogView = inflater.inflate(R.layout.popup_folder_view, null);
 
@@ -1770,12 +1776,71 @@ public class MainActivity extends Activity {
         final AppAdapter adapter = new AppAdapter(this, folder.apps);
         gv.setAdapter(adapter);
 
+        float density = getResources().getDisplayMetrics().density;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int screenWidth = dm.widthPixels;
+        int screenHeight = dm.heightPixels;
+
+        int popupWidth = (int) (310 * density);
+        dialogView.measure(
+                View.MeasureSpec.makeMeasureSpec(popupWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+        int popupHeight = dialogView.getMeasuredHeight();
+
         final PopupWindow popupWindow = new PopupWindow(dialogView,
-                (int) (310 * getResources().getDisplayMetrics().density),
+                popupWidth,
                 ViewGroup.LayoutParams.WRAP_CONTENT, true);
 
         popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popupWindow.setElevation(28f);
+        popupWindow.setElevation(28f * density);
+
+        // Position folder directly near the folder icon (Android 17 style)
+        int targetX;
+        int targetY;
+        float pivotX;
+        float pivotY;
+
+        int margin = (int) (14 * density);
+        int topMargin = (int) (48 * density);
+        int bottomMargin = (int) (70 * density);
+
+        if (anchorView != null) {
+            int[] loc = new int[2];
+            anchorView.getLocationOnScreen(loc);
+            float iconCenterX = loc[0] + anchorView.getWidth() / 2f;
+            float iconCenterY = loc[1] + anchorView.getHeight() / 2f;
+
+            targetX = (int) (iconCenterX - popupWidth / 2f);
+            if (targetX < margin) targetX = margin;
+            if (targetX + popupWidth > screenWidth - margin) {
+                targetX = screenWidth - margin - popupWidth;
+            }
+
+            // Center vertically over folder icon, clamped within screen margins
+            targetY = (int) (iconCenterY - popupHeight / 2f);
+            if (targetY < topMargin) {
+                targetY = topMargin;
+            }
+            if (targetY + popupHeight > screenHeight - bottomMargin) {
+                targetY = screenHeight - bottomMargin - popupHeight;
+            }
+
+            // Morph pivot originates exactly from folder icon center
+            pivotX = iconCenterX - targetX;
+            pivotY = iconCenterY - targetY;
+        } else {
+            targetX = (screenWidth - popupWidth) / 2;
+            targetY = (screenHeight - popupHeight) / 2;
+            pivotX = popupWidth / 2f;
+            pivotY = popupHeight / 2f;
+        }
+
+        dialogView.setPivotX(pivotX);
+        dialogView.setPivotY(pivotY);
+        dialogView.setScaleX(0.18f);
+        dialogView.setScaleY(0.18f);
+        dialogView.setAlpha(0f);
 
         gv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -1827,8 +1892,15 @@ public class MainActivity extends Activity {
             public void afterTextChanged(Editable s) {}
         });
 
-        popupWindow.showAtLocation(rootLayout, Gravity.CENTER, 0, 0);
-        animatePopIn(dialogView);
+        popupWindow.showAtLocation(rootLayout, Gravity.NO_GRAVITY, targetX, targetY);
+
+        dialogView.animate()
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .alpha(1.0f)
+                .setDuration(240)
+                .setInterpolator(new OvershootInterpolator(1.15f))
+                .start();
     }
 
     private void savePages() {
@@ -2585,140 +2657,69 @@ public class MainActivity extends Activity {
     }
 
     private void enterPageWindowMode() {
-        isWindowModeActive = true;
-        float density = getResources().getDisplayMetrics().density;
+        // Pure Pixel Launcher Drag: zero blur, zero dark overlay, 100% crystal-clear workspace
+        isWindowModeActive = false;
+        windowScaleX = 1.0f;
+        windowScaleY = 1.0f;
 
         if (dragBlurOverlay != null) {
-            dragBlurOverlay.setVisibility(View.VISIBLE);
-            dragBlurOverlay.setAlpha(0f);
-            dragBlurOverlay.animate().alpha(1.0f).setDuration(220).start();
+            dragBlurOverlay.setVisibility(View.GONE);
         }
 
         if (hsvDragPageChips != null) {
-            updateDragPageChips(currentPage);
-            hsvDragPageChips.setVisibility(View.VISIBLE);
-            hsvDragPageChips.setAlpha(0f);
-            hsvDragPageChips.setTranslationY(20f * density);
-            hsvDragPageChips.animate()
-                    .alpha(1f)
-                    .translationY(0f)
-                    .setDuration(220)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
+            hsvDragPageChips.setVisibility(View.GONE);
         }
 
         for (TextView badge : pageCardBadges) {
-            badge.setVisibility(View.VISIBLE);
-            badge.setAlpha(0f);
-            badge.animate().alpha(1f).setDuration(200).start();
-        }
-
-        applyBackgroundBlur(true);
-
-        // Uniform 0.85x scaling for natural, beautiful page window cards
-        windowScaleX = 0.85f;
-        windowScaleY = 0.85f;
-
-        for (int i = 0; i < pageContainers.size(); i++) {
-            FrameLayout container = pageContainers.get(i);
-            if (i == currentPage) {
-                container.setBackgroundResource(R.drawable.window_page_active_bg);
-            } else {
-                container.setBackgroundResource(R.drawable.window_page_bg);
-            }
-            container.setElevation(10 * density);
-            container.animate()
-                    .scaleX(windowScaleX)
-                    .scaleY(windowScaleY)
-                    .setDuration(250)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
-        }
-    }
-
-    private void updateActivePageWindow(int activeIndex) {
-        if (!isWindowModeActive) return;
-        for (int i = 0; i < pageContainers.size(); i++) {
-            FrameLayout container = pageContainers.get(i);
-            if (i == activeIndex) {
-                container.setBackgroundResource(R.drawable.window_page_active_bg);
-            } else {
-                container.setBackgroundResource(R.drawable.window_page_bg);
-            }
-        }
-    }
-
-    private void exitPageWindowMode() {
-        if (!isWindowModeActive) return;
-        isWindowModeActive = false;
-        float density = getResources().getDisplayMetrics().density;
-
-        if (dragBlurOverlay != null) {
-            dragBlurOverlay.animate().alpha(0f).setDuration(200).withEndAction(new Runnable() {
-                @Override
-                public void run() {
-                    dragBlurOverlay.setVisibility(View.GONE);
-                }
-            }).start();
-        }
-
-        if (hsvDragPageChips != null) {
-            hsvDragPageChips.animate()
-                    .alpha(0f)
-                    .translationY(20f * density)
-                    .setDuration(180)
-                    .withEndAction(new Runnable() {
-                        @Override
-                        public void run() {
-                            hsvDragPageChips.setVisibility(View.GONE);
-                        }
-                    }).start();
-        }
-
-        for (final TextView badge : pageCardBadges) {
-            badge.animate().alpha(0f).setDuration(180).withEndAction(new Runnable() {
-                @Override
-                public void run() {
-                    badge.setVisibility(View.GONE);
-                }
-            }).start();
+            badge.setVisibility(View.GONE);
         }
 
         applyBackgroundBlur(false);
 
         for (int i = 0; i < pageContainers.size(); i++) {
-            final FrameLayout container = pageContainers.get(i);
-            container.animate()
-                    .scaleX(1.0f)
-                    .scaleY(1.0f)
-                    .setDuration(220)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .withEndAction(new Runnable() {
-                        @Override
-                        public void run() {
-                            container.setBackground(null);
-                            container.setElevation(0f);
-                        }
-                    })
-                    .start();
+            FrameLayout container = pageContainers.get(i);
+            container.setBackground(null);
+            container.setElevation(0f);
+            container.setScaleX(1.0f);
+            container.setScaleY(1.0f);
+        }
+    }
+
+    private void updateActivePageWindow(int activeIndex) {
+        // Pixel Launcher style: clean 1:1 pages without window card borders
+    }
+
+    private void exitPageWindowMode() {
+        isWindowModeActive = false;
+        applyBackgroundBlur(false);
+
+        if (dragBlurOverlay != null) {
+            dragBlurOverlay.setVisibility(View.GONE);
+        }
+
+        if (hsvDragPageChips != null) {
+            hsvDragPageChips.setVisibility(View.GONE);
+        }
+
+        for (final TextView badge : pageCardBadges) {
+            badge.setVisibility(View.GONE);
+        }
+
+        for (int i = 0; i < pageContainers.size(); i++) {
+            FrameLayout container = pageContainers.get(i);
+            container.setBackground(null);
+            container.setElevation(0f);
+            container.setScaleX(1.0f);
+            container.setScaleY(1.0f);
         }
     }
 
     private void applyBackgroundBlur(boolean enable) {
-        if (Build.VERSION.SDK_INT >= 31 && homeScreen != null) {
+        // Disabled: Pixel Launcher keeps workspace unblurred during icon drag
+        if (homeScreen != null && Build.VERSION.SDK_INT >= 31) {
             try {
-                if (enable) {
-                    Class<?> renderEffectClass = Class.forName("android.graphics.RenderEffect");
-                    Class<?> tileModeClass = Class.forName("android.graphics.Shader$TileMode");
-                    Object clampTileMode = Enum.valueOf((Class<Enum>) tileModeClass, "CLAMP");
-                    Method createBlurMethod = renderEffectClass.getMethod("createBlurEffect", float.class, float.class, tileModeClass);
-                    Object blurEffect = createBlurMethod.invoke(null, 25f, 25f, clampTileMode);
-                    Method setRenderEffectMethod = View.class.getMethod("setRenderEffect", renderEffectClass);
-                    setRenderEffectMethod.invoke(homeScreen, blurEffect);
-                } else {
-                    Method setRenderEffectMethod = View.class.getMethod("setRenderEffect", Class.forName("android.graphics.RenderEffect"));
-                    setRenderEffectMethod.invoke(homeScreen, (Object) null);
-                }
+                Method setRenderEffectMethod = View.class.getMethod("setRenderEffect", Class.forName("android.graphics.RenderEffect"));
+                setRenderEffectMethod.invoke(homeScreen, (Object) null);
             } catch (Throwable ignored) {}
         }
     }

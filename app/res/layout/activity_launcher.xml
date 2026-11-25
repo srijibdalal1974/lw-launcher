@@ -319,13 +319,13 @@
         android:visibility="gone"
         android:elevation="60dp">
 
-        <!-- BACKGROUND BLUR / FROSTED SCRIM -->
+        <!-- BACKGROUND BLUR / FROSTED SCRIM (Disabled for Pixel Launcher clarity) -->
         <View
             android:id="@+id/drag_blur_overlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="#730A0E14"
-            android:alpha="0" />
+            android:background="@android:color/transparent"
+            android:visibility="gone" />
 
         <!-- TOP DROP TARGETS BAR (Android 17 / Pixel Launcher) -->
         <LinearLayout

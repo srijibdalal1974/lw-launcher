@@ -184,6 +184,26 @@ def main():
         "Verify Signed APK"
     )
 
+    # Produce v2 named assets
+    aab_v2_path = os.path.join(release_dir, "LW_Launcher_v2.aab")
+    apk_v2_path = os.path.join(release_dir, "LW_Launcher_v2.apk")
+    shutil.copy2(aab_path, aab_v2_path)
+    shutil.copy2(apk_path, apk_v2_path)
+
+    # Deliver to Downloads directories
+    download_dirs = [
+        r"C:\Users\sriji\Downloads\LW_Launcher",
+        r"C:\Users\sriji\Downloads\LW_Launcher_v2",
+        r"C:\Users\sriji\Downloads\lw laucher v2"
+    ]
+    for d in download_dirs:
+        os.makedirs(d, exist_ok=True)
+        shutil.copy2(aab_path, os.path.join(d, "LW_Launcher.aab"))
+        shutil.copy2(apk_path, os.path.join(d, "LW_Launcher.apk"))
+        shutil.copy2(aab_v2_path, os.path.join(d, "LW_Launcher_v2.aab"))
+        shutil.copy2(apk_v2_path, os.path.join(d, "LW_Launcher_v2.apk"))
+        print(f"[OK] Delivered v2 release assets to {d}")
+
     # Summary
     aab_size = os.path.getsize(aab_path)
     apk_size = os.path.getsize(apk_path)
