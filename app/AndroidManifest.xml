@@ -4,21 +4,33 @@
     android:versionCode="302"
     android:versionName="3.0.2">
 
+    <!--
+        Play Store requirements:
+        - minSdkVersion 30  = Android 11 (minimum supported)
+        - targetSdkVersion 36 = Android 16/17 (latest, required for new Play apps)
+    -->
     <uses-sdk
-        android:minSdkVersion="26"
+        android:minSdkVersion="30"
         android:targetSdkVersion="36" />
 
+    <!-- QUERY_ALL_PACKAGES: required for launcher to list all installed apps.
+         Google Play allows this for home screen / launcher apps (use case exemption). -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- REQUEST_INSTALL_PACKAGES not needed; we never install APKs -->
+    <!-- Internet not needed; pure offline launcher -->
 
     <application
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/Theme.PixelLauncher"
-        android:hardwareAccelerated="true">
+        android:hardwareAccelerated="true"
+        android:allowBackup="false"
+        android:supportsRtl="true">
 
         <activity
             android:name=".MainActivity"
