@@ -13,7 +13,4 @@
 
   <!-- FEATHER / SPEED ACCENT SLASH OVER W (LIGHTWEIGHT SPEED) -->
   <path fill="none" stroke="#38BDF8" stroke-width="3" stroke-linecap="round" d="M66,32 L88,32" />
-
-  <!-- CORE SPARKLE / GEMINI STAR (ANDROID 17 AI ACCENT) -->
-  <path fill="#FFFFFF" d="M80,24 C80,26.5 82,28.5 84.5,28.5 C82,28.5 80,30.5 80,33 C80,30.5 78,28.5 75.5,28.5 C78,28.5 80,26.5 80,24 Z" />
 </svg>
