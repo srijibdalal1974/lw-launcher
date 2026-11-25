@@ -248,6 +248,8 @@ public class MainActivity extends Activity {
     private View dragSourceView = null;
     private View currentHoverView = null;
     private long lastEdgeScrollTime = 0L;
+    private long edgeHoldStartTime = 0L;
+    private int pendingEdgeDirection = 0;
 
     // Android 17 Customization Panel & Drag Window Mode
     private FrameLayout customizationPanelOverlay;
@@ -700,14 +702,34 @@ public class MainActivity extends Activity {
         }, 100);
     }
 
+    private void triggerPageSwitchVibration() {
+        try {
+            if (rootLayout != null) {
+                rootLayout.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+            }
+            android.os.Vibrator v = (android.os.Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    v.vibrate(android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    v.vibrate(40);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void scrollToPage(int pageIdx) {
         if (pageIdx < 0 || pageIdx >= pages.size()) return;
+        boolean pageChanged = (currentPage != pageIdx);
         currentPage = pageIdx;
         int targetX = pageIdx * getScreenWidth();
         hsvHomePages.smoothScrollTo(targetX, 0);
         updatePageDots(pageIdx);
         updateActivePageWindow(pageIdx);
         updateDragPageChips(pageIdx);
+        if (isDragActive && pageChanged) {
+            triggerPageSwitchVibration();
+        }
     }
 
     private void updatePageDots(int activePage) {
@@ -811,6 +833,8 @@ public class MainActivity extends Activity {
         isDragActive = true;
         dragMoved = false;
         activeDropZone = DROP_ZONE_NONE;
+        edgeHoldStartTime = 0L;
+        pendingEdgeDirection = 0;
         dragStartX = lastTouchRawX;
         dragStartY = lastTouchRawY;
         dragSourcePage = pageIdx;
@@ -938,23 +962,47 @@ public class MainActivity extends Activity {
                             unhighlightDropTarget(dropTargetUninstall, R.drawable.drop_target_bg);
                         }
 
-                        // Fast, snappy edge scrolling (220ms debounce, 85dp margin)
+                        // Intentional, refined edge scrolling (36dp margin, 500ms hold dwell)
                         long now = System.currentTimeMillis();
                         int screenW = getScreenWidth();
-                        if (now - lastEdgeScrollTime > 220) {
-                            if (ev.getRawX() > screenW - (85 * density)) {
-                                if (currentPage < pages.size() - 1) {
-                                    scrollToPage(currentPage + 1);
-                                    lastEdgeScrollTime = now;
-                                } else if (pages.size() < 7) {
-                                    int newPageIdx = addNewPage();
-                                    scrollToPage(newPageIdx);
-                                    lastEdgeScrollTime = now;
+                        float edgeThreshold = 36 * density;
+
+                        int currentEdgeDir = 0;
+                        if (ev.getRawX() > screenW - edgeThreshold) {
+                            currentEdgeDir = 1;
+                        } else if (ev.getRawX() < edgeThreshold) {
+                            currentEdgeDir = -1;
+                        }
+
+                        if (currentEdgeDir != 0) {
+                            if (pendingEdgeDirection != currentEdgeDir) {
+                                pendingEdgeDirection = currentEdgeDir;
+                                edgeHoldStartTime = now;
+                            } else {
+                                if (now - edgeHoldStartTime >= 500 && now - lastEdgeScrollTime > 600) {
+                                    if (pendingEdgeDirection == 1) {
+                                        if (currentPage < pages.size() - 1) {
+                                            scrollToPage(currentPage + 1);
+                                            lastEdgeScrollTime = now;
+                                            edgeHoldStartTime = now;
+                                        } else if (pages.size() < 7 && now - lastEdgeScrollTime > 1000) {
+                                            int newPageIdx = addNewPage();
+                                            scrollToPage(newPageIdx);
+                                            lastEdgeScrollTime = now;
+                                            edgeHoldStartTime = now;
+                                        }
+                                    } else if (pendingEdgeDirection == -1) {
+                                        if (currentPage > 0) {
+                                            scrollToPage(currentPage - 1);
+                                            lastEdgeScrollTime = now;
+                                            edgeHoldStartTime = now;
+                                        }
+                                    }
                                 }
-                            } else if (ev.getRawX() < (85 * density) && currentPage > 0) {
-                                scrollToPage(currentPage - 1);
-                                lastEdgeScrollTime = now;
                             }
+                        } else {
+                            pendingEdgeDirection = 0;
+                            edgeHoldStartTime = 0L;
                         }
 
                         // Fast, snappy page chip hovering (180ms debounce)
@@ -1108,6 +1156,8 @@ public class MainActivity extends Activity {
         }
 
         isDragActive = false;
+        edgeHoldStartTime = 0L;
+        pendingEdgeDirection = 0;
 
         if (!dragMoved) {
             Log.d("PixelDrag", "endDrag without move: showing popup directly without blur");
@@ -1140,6 +1190,8 @@ public class MainActivity extends Activity {
         }
 
         isDragActive = false;
+        edgeHoldStartTime = 0L;
+        pendingEdgeDirection = 0;
 
         if (!dragMoved) {
             Log.d("PixelDrag", "endDrag without move: showing popup");
@@ -2657,10 +2709,11 @@ public class MainActivity extends Activity {
     }
 
     private void enterPageWindowMode() {
-        // Pure Pixel Launcher Drag: zero blur, zero dark overlay, 100% crystal-clear workspace
-        isWindowModeActive = false;
-        windowScaleX = 1.0f;
-        windowScaleY = 1.0f;
+        isWindowModeActive = true;
+        float density = getResources().getDisplayMetrics().density;
+        // Subtle natural zoom out (0.93f) reveals adjacent card edges
+        windowScaleX = 0.93f;
+        windowScaleY = 0.93f;
 
         if (dragBlurOverlay != null) {
             dragBlurOverlay.setVisibility(View.GONE);
@@ -2678,19 +2731,38 @@ public class MainActivity extends Activity {
 
         for (int i = 0; i < pageContainers.size(); i++) {
             FrameLayout container = pageContainers.get(i);
-            container.setBackground(null);
-            container.setElevation(0f);
-            container.setScaleX(1.0f);
-            container.setScaleY(1.0f);
+            if (i == currentPage) {
+                container.setBackgroundResource(R.drawable.drag_card_active_bg);
+            } else {
+                container.setBackgroundResource(R.drawable.drag_card_inactive_bg);
+            }
+            container.setElevation(6f * density);
+            container.animate()
+                    .scaleX(windowScaleX)
+                    .scaleY(windowScaleY)
+                    .setDuration(240)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
         }
     }
 
     private void updateActivePageWindow(int activeIndex) {
-        // Pixel Launcher style: clean 1:1 pages without window card borders
+        if (!isWindowModeActive) return;
+        for (int i = 0; i < pageContainers.size(); i++) {
+            FrameLayout container = pageContainers.get(i);
+            if (i == activeIndex) {
+                container.setBackgroundResource(R.drawable.drag_card_active_bg);
+            } else {
+                container.setBackgroundResource(R.drawable.drag_card_inactive_bg);
+            }
+        }
     }
 
     private void exitPageWindowMode() {
+        if (!isWindowModeActive) return;
         isWindowModeActive = false;
+        windowScaleX = 1.0f;
+        windowScaleY = 1.0f;
         applyBackgroundBlur(false);
 
         if (dragBlurOverlay != null) {
@@ -2706,11 +2778,20 @@ public class MainActivity extends Activity {
         }
 
         for (int i = 0; i < pageContainers.size(); i++) {
-            FrameLayout container = pageContainers.get(i);
-            container.setBackground(null);
-            container.setElevation(0f);
-            container.setScaleX(1.0f);
-            container.setScaleY(1.0f);
+            final FrameLayout container = pageContainers.get(i);
+            container.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(220)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(new Runnable() {
+                        @Override
+                        public void run() {
+                            container.setBackground(null);
+                            container.setElevation(0f);
+                        }
+                    })
+                    .start();
         }
     }
 
