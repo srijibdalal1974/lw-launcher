@@ -189,10 +189,14 @@ def main():
     apk_v2_path = os.path.join(release_dir, "LW_Launcher_v2.apk")
     aab_v3_path = os.path.join(release_dir, "LW_Launcher_v3.aab")
     apk_v3_path = os.path.join(release_dir, "LW_Launcher_v3.apk")
+    aab_v302_path = os.path.join(release_dir, "LW_Launcher_v3.0.2.aab")
+    apk_v302_path = os.path.join(release_dir, "LW_Launcher_v3.0.2.apk")
     shutil.copy2(aab_path, aab_v2_path)
     shutil.copy2(apk_path, apk_v2_path)
     shutil.copy2(aab_path, aab_v3_path)
     shutil.copy2(apk_path, apk_v3_path)
+    shutil.copy2(aab_path, aab_v302_path)
+    shutil.copy2(apk_path, apk_v302_path)
 
     # Deliver to Downloads directories
     download_dirs = [
@@ -207,6 +211,8 @@ def main():
         shutil.copy2(apk_path, os.path.join(d, "LW_Launcher.apk"))
         shutil.copy2(aab_v3_path, os.path.join(d, "LW_Launcher_v3.aab"))
         shutil.copy2(apk_v3_path, os.path.join(d, "LW_Launcher_v3.apk"))
+        shutil.copy2(aab_v302_path, os.path.join(d, "LW_Launcher_v3.0.2.aab"))
+        shutil.copy2(apk_v302_path, os.path.join(d, "LW_Launcher_v3.0.2.apk"))
         print(f"[OK] Delivered v3 release assets to {d}")
 
     # Summary
