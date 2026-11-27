@@ -6,11 +6,16 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityOptions;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
@@ -18,6 +23,8 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.Interpolator;
 import android.view.animation.OvershootInterpolator;
 import android.view.animation.PathInterpolator;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 
 import java.lang.reflect.Method;
 
@@ -39,6 +46,13 @@ public final class UiMotion {
     private static boolean checkedBgBlurMethod = false;
     private static Method cachedLpSetBlurBehindRadius = null;
     private static boolean checkedLpBlurMethod = false;
+
+    // ---- Software blur fallback for API 30 (Android 11) ----
+    private static ImageView softBlurOverlay;
+    private static Bitmap softBlurredBitmap;
+    private static boolean softBlurPrepared = false;
+    private static ColorDrawable windowDimDrawable;
+    private static final float SOFT_BLUR_MAX_DP = 26f;
 
     private static final int TAG_SCALE_ANIMATOR = 0x7F0A1101;
     private static final int TAG_PRESS_DOWN_COORDS = 0x7F0A1102;
@@ -387,25 +401,165 @@ public final class UiMotion {
     }
 
     public static void setBackdropBlurDp(View targetView, float radiusDp) {
-        if (targetView == null || Build.VERSION.SDK_INT < 31) return;
-        try {
-            if (!checkedRenderEffect) {
-                checkedRenderEffect = true;
-                Class<?> reClass = Class.forName("android.graphics.RenderEffect");
-                Class<?> tmClass = Class.forName("android.graphics.Shader$TileMode");
-                cachedClampTileMode = Enum.valueOf((Class) tmClass, "CLAMP");
-                cachedCreateBlurEffect = reClass.getMethod("createBlurEffect", float.class, float.class, tmClass);
-                cachedSetRenderEffect = View.class.getMethod("setRenderEffect", reClass);
-            }
-            if (cachedSetRenderEffect == null || cachedCreateBlurEffect == null) return;
-            if (radiusDp <= 0.6f) {
-                cachedSetRenderEffect.invoke(targetView, new Object[]{null});
+        if (targetView == null) return;
+
+        if (Build.VERSION.SDK_INT >= 31) {
+            // Native RenderEffect path (Android 12+)
+            try {
+                if (!checkedRenderEffect) {
+                    checkedRenderEffect = true;
+                    Class<?> reClass = Class.forName("android.graphics.RenderEffect");
+                    Class<?> tmClass = Class.forName("android.graphics.Shader$TileMode");
+                    cachedClampTileMode = Enum.valueOf((Class) tmClass, "CLAMP");
+                    cachedCreateBlurEffect = reClass.getMethod("createBlurEffect", float.class, float.class, tmClass);
+                    cachedSetRenderEffect = View.class.getMethod("setRenderEffect", reClass);
+                }
+                if (cachedSetRenderEffect == null || cachedCreateBlurEffect == null) return;
+                if (radiusDp <= 0.6f) {
+                    cachedSetRenderEffect.invoke(targetView, new Object[]{null});
+                } else {
+                    float rPx = radiusDp * targetView.getResources().getDisplayMetrics().density;
+                    Object effect = cachedCreateBlurEffect.invoke(null, rPx, rPx, cachedClampTileMode);
+                    cachedSetRenderEffect.invoke(targetView, effect);
+                }
+            } catch (Throwable ignored) {}
+        } else {
+            // Software blur fallback (Android 11 / API 30)
+            if (radiusDp > 0.6f) {
+                if (!softBlurPrepared) {
+                    prepareSoftwareBlur(targetView);
+                }
+                if (softBlurOverlay != null) {
+                    float fraction = Math.min(1f, radiusDp / SOFT_BLUR_MAX_DP);
+                    softBlurOverlay.setAlpha(fraction);
+                    softBlurOverlay.setScaleX(targetView.getScaleX());
+                    softBlurOverlay.setScaleY(targetView.getScaleY());
+                    softBlurOverlay.setPivotX(targetView.getWidth() / 2f);
+                    softBlurOverlay.setPivotY(targetView.getHeight() / 2f);
+                    softBlurOverlay.setVisibility(View.VISIBLE);
+                }
             } else {
-                float rPx = radiusDp * targetView.getResources().getDisplayMetrics().density;
-                Object effect = cachedCreateBlurEffect.invoke(null, rPx, rPx, cachedClampTileMode);
-                cachedSetRenderEffect.invoke(targetView, effect);
+                if (softBlurOverlay != null) {
+                    softBlurOverlay.setAlpha(0f);
+                    softBlurOverlay.setVisibility(View.GONE);
+                }
+            }
+        }
+    }
+
+    /**
+     * Captures the target view to a small bitmap, applies a fast box blur,
+     * and creates an overlay ImageView positioned on top of the target.
+     * Used as a blur fallback on Android 11 (API 30) where RenderEffect is unavailable.
+     */
+    private static void prepareSoftwareBlur(View target) {
+        clearSoftwareBlur();
+        try {
+            int w = target.getWidth();
+            int h = target.getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            // Downscale by 1/12 for heavy pre-blur + small memory footprint
+            float scale = 1f / 12f;
+            int sw = Math.max(1, (int) (w * scale));
+            int sh = Math.max(1, (int) (h * scale));
+
+            Bitmap small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(small);
+            canvas.scale(scale, scale);
+            target.draw(canvas);
+
+            // Apply 2 passes of box blur for smooth Gaussian-like result
+            fastBoxBlur(small, 3);
+            fastBoxBlur(small, 3);
+
+            softBlurredBitmap = small;
+
+            // Create overlay ImageView and insert above target in z-order
+            ViewGroup parent = (ViewGroup) target.getParent();
+            if (parent != null) {
+                ImageView overlay = new ImageView(target.getContext());
+                overlay.setScaleType(ImageView.ScaleType.FIT_XY);
+                overlay.setImageBitmap(softBlurredBitmap);
+                overlay.setAlpha(0f);
+                overlay.setClickable(false);
+                overlay.setFocusable(false);
+                overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                overlay.setVisibility(View.GONE);
+
+                int idx = parent.indexOfChild(target);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                );
+                parent.addView(overlay, idx + 1, lp);
+
+                softBlurOverlay = overlay;
+                softBlurPrepared = true;
             }
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Removes the software blur overlay and recycles the blurred bitmap.
+     * Call this when the drawer closes or the blur is no longer needed.
+     */
+    public static void clearSoftwareBlur() {
+        if (softBlurOverlay != null) {
+            ViewGroup parent = (ViewGroup) softBlurOverlay.getParent();
+            if (parent != null) parent.removeView(softBlurOverlay);
+            softBlurOverlay.setImageBitmap(null);
+            softBlurOverlay = null;
+        }
+        if (softBlurredBitmap != null && !softBlurredBitmap.isRecycled()) {
+            softBlurredBitmap.recycle();
+            softBlurredBitmap = null;
+        }
+        softBlurPrepared = false;
+    }
+
+    /**
+     * Fast in-place box blur on a small bitmap. O(w*h*(2r+1)^2) but trivial
+     * on a ~90x200 downscaled image. Two passes approximate a Gaussian kernel.
+     */
+    private static void fastBoxBlur(Bitmap bmp, int radius) {
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+        int[] pix = new int[w * h];
+        bmp.getPixels(pix, 0, w, 0, 0, w, h);
+        int[] out = new int[w * h];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int ra = 0, ga = 0, ba = 0, aa = 0, count = 0;
+                for (int dy = -radius; dy <= radius; dy++) {
+                    int ny = Math.max(0, Math.min(h - 1, y + dy));
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int nx = Math.max(0, Math.min(w - 1, x + dx));
+                        int c = pix[ny * w + nx];
+                        aa += (c >> 24) & 0xFF;
+                        ra += (c >> 16) & 0xFF;
+                        ga += (c >> 8) & 0xFF;
+                        ba += c & 0xFF;
+                        count++;
+                    }
+                }
+                out[y * w + x] = ((aa / count) << 24) | ((ra / count) << 16)
+                        | ((ga / count) << 8) | (ba / count);
+            }
+        }
+        bmp.setPixels(out, 0, w, 0, 0, w, h);
+    }
+
+    /**
+     * Clears the window-level dim scrim used as a blur fallback on API 30.
+     */
+    public static void clearWindowDimScrim(Window window) {
+        if (window == null || Build.VERSION.SDK_INT >= 31) return;
+        View decor = window.getDecorView();
+        if (decor != null) {
+            decor.setForeground(null);
+        }
+        windowDimDrawable = null;
     }
 
     private static final int TAG_WINDOW_BLUR_RADIUS = 0x7F0A0092;
@@ -419,9 +573,35 @@ public final class UiMotion {
     /**
      * Drives Android 12+ SurfaceFlinger background blur behind the Launcher window (blurring live wallpaper)
      * matching Pixel Launcher's backgroundBlurRadius (~30dp).
+     * On Android 11 (API 30), falls back to a semi-transparent dim scrim on the decor view.
      */
     public static void setWindowBackgroundBlurRadius(Window window, int radiusPx) {
-        if (window == null || Build.VERSION.SDK_INT < 31) return;
+        if (window == null) return;
+
+        if (Build.VERSION.SDK_INT < 31) {
+            // API 30 fallback: semi-transparent scrim simulating wallpaper dim
+            View decor = window.getDecorView();
+            if (decor != null) {
+                float density = decor.getResources().getDisplayMetrics().density;
+                float maxBlurPx = 30f * density;
+                float fraction = Math.min(1f, radiusPx / Math.max(1f, maxBlurPx));
+                int alpha = (int) (fraction * 0.32f * 255);
+                if (alpha <= 2) {
+                    if (windowDimDrawable != null) {
+                        decor.setForeground(null);
+                        windowDimDrawable = null;
+                    }
+                } else {
+                    if (windowDimDrawable == null) {
+                        windowDimDrawable = new ColorDrawable(Color.argb(alpha, 0, 0, 0));
+                        decor.setForeground(windowDimDrawable);
+                    } else {
+                        windowDimDrawable.setColor(Color.argb(alpha, 0, 0, 0));
+                    }
+                }
+            }
+            return;
+        }
         View decor = window.getDecorView();
         int clamped = Math.max(0, radiusPx);
         if (decor != null) {

@@ -352,6 +352,7 @@ public class AppDrawerController {
         homeScreen.setScaleY(1.0f);
         homeScreen.setAlpha(1.0f);
         UiMotion.setBackdropBlurDp(homeScreen, 0f);
+        UiMotion.clearSoftwareBlur();
         homeScreen.setVisibility(View.VISIBLE);
         DisplayRefreshHelper.setFrameContentVelocity(appDrawer, 0f);
         DisplayRefreshHelper.requestInteractiveBoost(appDrawer.getContext(), false);

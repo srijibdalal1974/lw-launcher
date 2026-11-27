@@ -5209,11 +5209,14 @@ public class MainActivity extends Activity {
 
     private void applyBackgroundBlur(boolean enable) {
         // Disabled: Pixel Launcher keeps workspace unblurred during icon drag
-        if (homeScreen != null && Build.VERSION.SDK_INT >= 31) {
-            try {
-                Method setRenderEffectMethod = View.class.getMethod("setRenderEffect", Class.forName("android.graphics.RenderEffect"));
-                setRenderEffectMethod.invoke(homeScreen, (Object) null);
-            } catch (Throwable ignored) {}
+        if (homeScreen != null) {
+            if (Build.VERSION.SDK_INT >= 31) {
+                try {
+                    Method setRenderEffectMethod = View.class.getMethod("setRenderEffect", Class.forName("android.graphics.RenderEffect"));
+                    setRenderEffectMethod.invoke(homeScreen, (Object) null);
+                } catch (Throwable ignored) {}
+            }
+            UiMotion.clearSoftwareBlur();
         }
     }
 
