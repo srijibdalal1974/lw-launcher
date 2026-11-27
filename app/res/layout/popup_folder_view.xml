@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Folder"
-        android:textColor="#FFFFFF"
+        android:textColor="@color/text_on_surface"
         android:textSize="18sp"
         android:fontFamily="sans-serif-medium"
         android:background="@null"
@@ -28,5 +28,8 @@
         android:verticalSpacing="12dp"
         android:horizontalSpacing="8dp"
         android:gravity="center"
+        android:listSelector="@android:color/transparent"
+        android:scrollbarThumbVertical="@drawable/scrollbar_thumb_rounded"
+        android:scrollbarSize="5dp"
         android:stretchMode="columnWidth" />
 </LinearLayout>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fallback home search bar (Dark mode) -->
+    <color name="search_bar_bg">#EB292C2E</color>
+    <color name="search_bar_stroke">#16FFFFFF</color>
+    <color name="search_text_color">#C4C7C5</color>
+
+    <!-- App Drawer (Dark mode frosted blur glass matching Pixel Launcher) -->
+    <color name="drawer_bg">#B8181A1C</color>
+    <color name="drawer_search_bg">#FF17181A</color>
+    <color name="drawer_search_stroke">#00000000</color>
+
+    <!-- Semantic Surface / Text Tokens (Dark Theme) -->
+    <color name="surface_sheet">#F2181D24</color>
+    <color name="surface_sheet_stroke">#2EFFFFFF</color>
+    <color name="surface_card">#1AFFFFFF</color>
+    <color name="surface_card_stroke">#24FFFFFF</color>
+    <color name="surface_popup">#F2111316</color>
+    <color name="surface_popup_stroke">#20FFFFFF</color>
+    <color name="pill_inactive">#18FFFFFF</color>
+    <color name="pill_inactive_stroke">#24FFFFFF</color>
+    <color name="ripple_surface">#26FFFFFF</color>
+    <color name="divider_line">#1FFFFFFF</color>
+
+    <color name="text_on_surface">#FFF1F3F4</color>
+    <color name="text_on_surface_secondary">#FF9EABB8</color>
+    <color name="icon_on_surface">#FFE3E3E3</color>
+    <color name="icon_on_surface_muted">#FFB0BEC5</color>
+
+    <color name="accent_primary">#FF2B7DE9</color>
+</resources>

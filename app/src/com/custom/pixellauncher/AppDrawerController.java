@@ -20,6 +20,8 @@ public class AppDrawerController {
 
     public interface Host {
         boolean canStartOpeningDrawer();
+        boolean isTouchInScrollbar(float rawX, float rawY);
+        void onDrawerOpenFractionChanged(float openFraction);
         void onDrawerDragStarted();
         void onDrawerDragEnded();
         void dispatchCancelToChildren(MotionEvent cancelEvent);
@@ -162,8 +164,9 @@ public class AppDrawerController {
                 eligibleForOpenDrag = true;
             }
         } else {
+            boolean inScrollbar = host.isTouchInScrollbar(downRawX, downRawY);
             boolean startedInHeader = isTouchAboveGrid(downRawY);
-            if (startedInHeader || isDrawerGridAtTop()) {
+            if (!inScrollbar && (startedInHeader || isDrawerGridAtTop())) {
                 eligibleForCloseDrag = true;
             }
         }
@@ -213,7 +216,7 @@ public class AppDrawerController {
         }
 
         float screenH = Math.max(1f, host.getScreenHeight());
-        float dragScale = (dragMode == DRAG_OPENING) ? 1.25f : 1.0f;
+        float dragScale = (dragMode == DRAG_OPENING) ? 1.08f : 1.0f;
         float newTransY = clamp(dragInitialTransY + (rawY - dragAnchorRawY) * dragScale, 0f, screenH);
         applyTransitionForTranslationY(newTransY, screenH);
         return true;
@@ -229,12 +232,14 @@ public class AppDrawerController {
 
         resetDrawerSearchAndScrollTop();
         appDrawer.setVisibility(View.VISIBLE);
+        appDrawer.requestFocus();
         homeScreen.setVisibility(View.VISIBLE);
         enableHardwareLayers(true);
-        float startTransY = clamp(screenH + (currentEv.getRawY() - dragAnchorRawY) * 1.25f, 0f, screenH);
+        float startTransY = clamp(screenH + (currentEv.getRawY() - dragAnchorRawY) * 1.08f, 0f, screenH);
         applyTransitionForTranslationY(startTransY, screenH);
 
         host.onDrawerDragStarted();
+        DisplayRefreshHelper.requestInteractiveBoost(appDrawer.getContext(), true);
         sendSyntheticCancel(currentEv);
     }
 
@@ -252,6 +257,7 @@ public class AppDrawerController {
         applyTransitionForTranslationY(clamp(dragInitialTransY + (currentEv.getRawY() - dragAnchorRawY), 0f, screenH), screenH);
 
         host.onDrawerDragStarted();
+        DisplayRefreshHelper.requestInteractiveBoost(appDrawer.getContext(), true);
         sendSyntheticCancel(currentEv);
     }
 
@@ -311,6 +317,7 @@ public class AppDrawerController {
         if (appDrawer.getVisibility() != View.VISIBLE) {
             resetDrawerSearchAndScrollTop();
             appDrawer.setVisibility(View.VISIBLE);
+            appDrawer.requestFocus();
             applyTransitionForTranslationY(screenH, screenH);
         }
         homeScreen.setVisibility(View.VISIBLE);
@@ -325,6 +332,31 @@ public class AppDrawerController {
         host.hideKeyboard();
         homeScreen.setVisibility(View.VISIBLE);
         animateDrawerTo(false, 0f);
+    }
+
+    public void collapseImmediately() {
+        if (appDrawer == null || homeScreen == null) return;
+        cancelAnimator();
+        isDragging = false;
+        dragMode = DRAG_NONE;
+        eligibleForOpenDrag = false;
+        eligibleForCloseDrag = false;
+        recycleVelocityTracker();
+        enableHardwareLayers(false);
+        host.hideKeyboard();
+        int screenH = Math.max(1, host.getScreenHeight());
+        appDrawer.setTranslationY(screenH);
+        appDrawer.setAlpha(0f);
+        appDrawer.setVisibility(View.GONE);
+        homeScreen.setScaleX(1.0f);
+        homeScreen.setScaleY(1.0f);
+        homeScreen.setAlpha(1.0f);
+        UiMotion.setBackdropBlurDp(homeScreen, 0f);
+        homeScreen.setVisibility(View.VISIBLE);
+        DisplayRefreshHelper.setFrameContentVelocity(appDrawer, 0f);
+        DisplayRefreshHelper.requestInteractiveBoost(appDrawer.getContext(), false);
+        resetDrawerSearchAndScrollTop();
+        host.onDrawerOpenFractionChanged(0f);
     }
 
     private void animateDrawerTo(final boolean open, float velocityY) {
@@ -347,13 +379,17 @@ public class AppDrawerController {
         isAnimatingToClose = !open;
         homeScreen.setVisibility(View.VISIBLE);
         enableHardwareLayers(true);
+        DisplayRefreshHelper.requestInteractiveBoost(appDrawer.getContext(), true);
+        DisplayRefreshHelper.setFrameContentVelocity(appDrawer, Math.abs(velocityY) > 10f ? velocityY : dist * 4f);
 
+        final DisplayRefreshHelper.FramePacer pacer = new DisplayRefreshHelper.FramePacer();
         drawerAnimator = ValueAnimator.ofFloat(startTransY, targetTransY);
         drawerAnimator.setDuration(duration);
         drawerAnimator.setInterpolator(QUINTIC_EASE_OUT);
         drawerAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
+                if (!pacer.shouldRender(animation)) return;
                 float transY = (float) animation.getAnimatedValue();
                 applyTransitionForTranslationY(transY, screenH);
             }
@@ -384,9 +420,11 @@ public class AppDrawerController {
     }
 
     private void onDrawerAnimationSettled(boolean open) {
+        DisplayRefreshHelper.setFrameContentVelocity(appDrawer, 0f);
+        DisplayRefreshHelper.requestInteractiveBoost(appDrawer.getContext(), false);
         if (open) {
             appDrawer.setVisibility(View.VISIBLE);
-            homeScreen.setVisibility(View.INVISIBLE);
+            homeScreen.setVisibility(View.VISIBLE);
         } else {
             appDrawer.setVisibility(View.GONE);
             homeScreen.setVisibility(View.VISIBLE);
@@ -397,30 +435,41 @@ public class AppDrawerController {
     private void applyTransitionForTranslationY(float transY, float screenH) {
         appDrawer.setTranslationY(transY);
         float openFraction = clamp(1f - (transY / Math.max(1f, screenH)), 0f, 1f);
-        appDrawer.setAlpha(clamp(0.55f + 0.45f * Math.min(1f, openFraction * 2.2f), 0f, 1f));
+        appDrawer.setAlpha(clamp(0.45f + 0.55f * Math.min(1f, openFraction * 2.0f), 0f, 1f));
 
-        float homeScale = 1.0f - (0.07f * openFraction);
+        float homeScale = 1.0f - (0.055f * openFraction);
         homeScreen.setScaleX(homeScale);
         homeScreen.setScaleY(homeScale);
-        homeScreen.setAlpha(1.0f - (0.70f * openFraction));
+        homeScreen.setAlpha(1.0f - (0.28f * openFraction));
+        UiMotion.setBackdropBlurDp(homeScreen, 26f * openFraction);
+        host.onDrawerOpenFractionChanged(openFraction);
     }
 
     private int computeSettleDuration(float distancePx, float screenH, float absVelocityY) {
         float ratio = Math.min(1f, distancePx / Math.max(1f, screenH));
+        int base;
         if (absVelocityY > minFlingVelocity) {
             float effectiveVel = Math.min(absVelocityY, maxFlingVelocity * 0.65f);
             int velDuration = Math.round(1000f * (distancePx / Math.max(effectiveVel, screenH * 2.5f)));
-            return Math.max(160, Math.min(280, velDuration + 90));
+            base = Math.max(160, Math.min(280, velDuration + 90));
+        } else {
+            base = Math.max(170, Math.min(300, Math.round(160 + ratio * 130)));
         }
-        return Math.max(170, Math.min(300, Math.round(160 + ratio * 130)));
+        return DisplayRefreshHelper.scaleDurationMs(base);
     }
 
     private void resetDrawerSearchAndScrollTop() {
         if (gvApps != null) {
             gvApps.setSelection(0);
         }
-        if (etDrawerSearch != null && etDrawerSearch.length() > 0) {
-            etDrawerSearch.setText("");
+        if (etDrawerSearch != null) {
+            if (etDrawerSearch.length() > 0) {
+                etDrawerSearch.setText("");
+            }
+            etDrawerSearch.clearFocus();
+        }
+        if (appDrawer != null) {
+            appDrawer.requestFocus();
         }
     }
 

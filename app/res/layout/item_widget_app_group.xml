@@ -30,7 +30,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="App Name"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_on_surface"
             android:textSize="15sp"
             android:fontFamily="sans-serif-medium"
             android:layout_marginStart="12dp"
@@ -42,7 +42,7 @@
             android:layout_height="wrap_content"
             android:background="@drawable/pill_inactive_bg"
             android:text="3 widgets"
-            android:textColor="#A0AEC0"
+            android:textColor="@color/text_on_surface_secondary"
             android:textSize="11sp"
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
@@ -54,7 +54,8 @@
             android:id="@+id/iv_app_group_chevron"
             android:layout_width="20dp"
             android:layout_height="20dp"
-            android:src="@drawable/ic_arrow_down" />
+            android:src="@drawable/ic_arrow_down"
+            android:tint="@color/icon_on_surface_muted" />
     </LinearLayout>
 
     <!-- EXPANDABLE CONTAINER FOR WIDGETS OF THIS APP -->

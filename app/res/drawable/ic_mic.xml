@@ -4,10 +4,20 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- Blue mic capsule -->
     <path
         android:fillColor="#4285F4"
         android:pathData="M12,14c1.66,0 3,-1.34 3,-3V5c0,-1.66 -1.34,-3 -3,-3S9,3.34 9,5v6c0,1.66 1.34,3 3,3z" />
+    <!-- Green vertical stem -->
     <path
         android:fillColor="#34A853"
-        android:pathData="M11,18.92v2.08h2v-2.08c3.95,-0.49 7,-3.85 7,-7.92h-1.9c0,3.37 -2.73,6.1 -6.1,6.1s-6.1,-2.73 -6.1,-6.1H4c0,4.07 3.05,7.43 7,7.92z" />
+        android:pathData="M11,17.85h2v3.15h-2z" />
+    <!-- Yellow left cradle arc -->
+    <path
+        android:fillColor="#FBBC05"
+        android:pathData="M7.05,15.95l1.41,-1.41C7.56,13.63 7,12.38 7,11H5c0,1.93 0.78,3.68 2.05,4.95z" />
+    <!-- Red lower and right cradle arc -->
+    <path
+        android:fillColor="#EA4335"
+        android:pathData="M12,16c-1.38,0 -2.63,-0.56 -3.54,-1.46l-1.41,1.41C8.32,17.22 10.07,18 12,18c3.87,0 7,-3.13 7,-7h-2c0,2.76 -2.24,5 -5,5z" />
 </vector>

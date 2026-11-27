@@ -1,6 +1,8 @@
 package com.custom.pixellauncher;
 
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
@@ -11,8 +13,10 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.util.LruCache;
 
 /**
  * Normalizes all launcher icons (AdaptiveIconDrawable, square/rounded-square bitmaps,
@@ -20,9 +24,9 @@ import android.os.Build;
  */
 public final class IconNormalizer {
 
-    private static final int OUTPUT_SIZE_PX = 160;
-    private static final int CIRCLE_PADDING_PX = 5;
-    private static final int SAMPLE_SIZE_PX = 144;
+    private static final int OUTPUT_SIZE_PX = 192;
+    private static final int CIRCLE_PADDING_PX = 2;
+    private static final int SAMPLE_SIZE_PX = 160;
 
     private IconNormalizer() {}
 
@@ -272,5 +276,266 @@ public final class IconNormalizer {
         circlePaint.setShader(new BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
         outCanvas.drawCircle(center, center, radius, circlePaint);
         return out;
+    }
+
+    public static final class AdaptiveLaunchLayers {
+        public final Bitmap bgBitmap;
+        public final int bgColor;
+        public final Bitmap fgBitmap;
+        public final boolean isAdaptive;
+
+        AdaptiveLaunchLayers(Bitmap bgBitmap, int bgColor, Bitmap fgBitmap, boolean isAdaptive) {
+            this.bgBitmap = bgBitmap;
+            this.bgColor = bgColor;
+            this.fgBitmap = fgBitmap;
+            this.isAdaptive = isAdaptive;
+        }
+    }
+
+    private static final LruCache<String, AdaptiveLaunchLayers> LAUNCH_LAYER_CACHE = new LruCache<>(24);
+
+    public static void prewarmLaunchLayers(final Context context, final java.util.List<AppInfo> apps, final int rasterPx) {
+        if (context == null || apps == null || apps.isEmpty()) return;
+        final java.util.List<AppInfo> snapshot = new java.util.ArrayList<>(apps);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int count = 0;
+                for (AppInfo a : snapshot) {
+                    if (a == null || a.packageName.isEmpty()) continue;
+                    extractAdaptiveLaunchLayers(context, a.packageName, a.activityName, a.icon, a.splashAccentColor, rasterPx);
+                    if (++count >= 16) break;
+                }
+            }
+        }, "LaunchLayerWarmup").start();
+    }
+
+    public static int extractSplashTintColor(Drawable raw) {
+        if (raw == null) return Color.TRANSPARENT;
+        try {
+            if (Build.VERSION.SDK_INT >= 26 && raw instanceof AdaptiveIconDrawable) {
+                AdaptiveIconDrawable aid = (AdaptiveIconDrawable) raw;
+                Drawable bg = aid.getBackground();
+                if (bg instanceof ColorDrawable) {
+                    int c = ((ColorDrawable) bg).getColor();
+                    if (Color.alpha(c) >= 128) return c;
+                }
+                int sampledBg = sampleDrawableDominantColor(bg, true);
+                if (Color.alpha(sampledBg) >= 128) return sampledBg;
+                return sampleDrawableDominantColor(raw, false);
+            }
+            return sampleDrawableDominantColor(raw, true);
+        } catch (Throwable ignored) {
+            return Color.TRANSPARENT;
+        }
+    }
+
+    public static AdaptiveLaunchLayers extractAdaptiveLaunchLayers(
+            Context context,
+            String packageName,
+            String activityName,
+            Drawable fallbackIcon,
+            int precomputedAccent,
+            int sizePx) {
+        final int targetPx = Math.max(96, sizePx);
+        final String pkg = packageName != null ? packageName : "";
+        final String act = activityName != null ? activityName : "";
+        final String cacheKey = (!pkg.isEmpty()) ? (pkg + "/" + act + "@" + targetPx) : "";
+
+        if (!cacheKey.isEmpty()) {
+            AdaptiveLaunchLayers cached = LAUNCH_LAYER_CACHE.get(cacheKey);
+            if (cached != null
+                    && cached.fgBitmap != null && !cached.fgBitmap.isRecycled()
+                    && (cached.bgBitmap == null || !cached.bgBitmap.isRecycled())) {
+                return cached;
+            }
+        }
+
+        Drawable raw = null;
+        if (context != null && !pkg.isEmpty()) {
+            try {
+                PackageManager pm = context.getPackageManager();
+                if (!act.isEmpty()) {
+                    raw = pm.getActivityIcon(new ComponentName(pkg, act));
+                }
+                if (raw == null) {
+                    raw = pm.getApplicationIcon(pkg);
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (raw == null) {
+            raw = fallbackIcon;
+        }
+
+        AdaptiveLaunchLayers result = null;
+        if (Build.VERSION.SDK_INT >= 26 && raw instanceof AdaptiveIconDrawable) {
+            AdaptiveIconDrawable aid = (AdaptiveIconDrawable) raw;
+            Drawable bg = aid.getBackground();
+            Drawable fg = aid.getForeground();
+            int bgColor = Color.alpha(precomputedAccent) >= 128 ? precomputedAccent : extractSplashTintColor(raw);
+
+            Bitmap bgBitmap = null;
+            boolean bgIsComplexArtwork = false;
+            if (bg != null && !(bg instanceof ColorDrawable)) {
+                try {
+                    bgBitmap = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888);
+                    Canvas bc = new Canvas(bgBitmap);
+                    int extra = Math.round(targetPx * 0.25f);
+                    Rect prev = bg.copyBounds();
+                    bg.setBounds(-extra, -extra, targetPx + extra, targetPx + extra);
+                    bg.draw(bc);
+                    bg.setBounds(prev);
+                    Integer uniform = detectUniformBitmapColor(bgBitmap, 72);
+                    if (uniform != null) {
+                        bgColor = uniform;
+                    } else {
+                        // High-contrast multi-color artwork in background (e.g. Chrome wheel): don't stretch across portrait card
+                        bgIsComplexArtwork = true;
+                    }
+                    bgBitmap.recycle();
+                    bgBitmap = null;
+                } catch (Throwable ignored) {
+                    if (bgBitmap != null) {
+                        bgBitmap.recycle();
+                        bgBitmap = null;
+                    }
+                }
+            }
+
+            Bitmap fgBitmap = null;
+            if (!bgIsComplexArtwork && fg != null) {
+                try {
+                    int fgSize = Math.max(targetPx, Math.round(targetPx * 1.5f));
+                    fgBitmap = Bitmap.createBitmap(fgSize, fgSize, Bitmap.Config.ARGB_8888);
+                    Canvas fc = new Canvas(fgBitmap);
+                    Rect prev = fg.copyBounds();
+                    fg.setBounds(0, 0, fgSize, fgSize);
+                    fg.draw(fc);
+                    fg.setBounds(prev);
+                } catch (Throwable ignored) {
+                    if (fgBitmap != null) {
+                        fgBitmap.recycle();
+                        fgBitmap = null;
+                    }
+                }
+            }
+
+            if (fgBitmap == null) {
+                if (bgIsComplexArtwork) {
+                    bgColor = Color.TRANSPARENT;
+                }
+                Bitmap full = rasterizeDrawableSafe(fallbackIcon != null ? fallbackIcon : raw, targetPx);
+                result = new AdaptiveLaunchLayers(null, bgColor, full, false);
+            } else {
+                result = new AdaptiveLaunchLayers(null, bgColor, fgBitmap, true);
+            }
+        }
+
+        if (result == null) {
+            Drawable src = fallbackIcon != null ? fallbackIcon : raw;
+            int tint = Color.alpha(precomputedAccent) >= 128 ? precomputedAccent : extractSplashTintColor(src);
+            Bitmap fg = rasterizeDrawableSafe(src, targetPx);
+            result = new AdaptiveLaunchLayers(null, tint, fg, false);
+        }
+
+        if (!cacheKey.isEmpty() && result.fgBitmap != null) {
+            LAUNCH_LAYER_CACHE.put(cacheKey, result);
+        }
+        return result;
+    }
+
+    private static Bitmap rasterizeDrawableSafe(Drawable d, int sizePx) {
+        if (d == null || sizePx <= 0) return null;
+        if (d instanceof BitmapDrawable) {
+            Bitmap b = ((BitmapDrawable) d).getBitmap();
+            if (b != null && !b.isRecycled()) return b;
+        }
+        try {
+            Bitmap bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            Rect prev = d.copyBounds();
+            d.setBounds(0, 0, sizePx, sizePx);
+            d.draw(c);
+            d.setBounds(prev);
+            return bmp;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static int sampleDrawableDominantColor(Drawable d, boolean preferEdge) {
+        if (d == null) return Color.TRANSPARENT;
+        Bitmap tiny = null;
+        try {
+            tiny = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(tiny);
+            Rect prev = d.copyBounds();
+            d.setBounds(0, 0, 16, 16);
+            d.draw(c);
+            d.setBounds(prev);
+
+            long sumR = 0, sumG = 0, sumB = 0;
+            int count = 0;
+            for (int y = 1; y < 15; y += 2) {
+                for (int x = 1; x < 15; x += 2) {
+                    if (preferEdge && x > 4 && x < 11 && y > 4 && y < 11) continue;
+                    int px = tiny.getPixel(x, y);
+                    if (Color.alpha(px) >= 180) {
+                        sumR += Color.red(px);
+                        sumG += Color.green(px);
+                        sumB += Color.blue(px);
+                        count++;
+                    }
+                }
+            }
+            if (count == 0) {
+                for (int y = 3; y < 13; y += 2) {
+                    for (int x = 3; x < 13; x += 2) {
+                        int px = tiny.getPixel(x, y);
+                        if (Color.alpha(px) >= 160) {
+                            sumR += Color.red(px);
+                            sumG += Color.green(px);
+                            sumB += Color.blue(px);
+                            count++;
+                        }
+                    }
+                }
+            }
+            return count > 0 ? Color.rgb((int) (sumR / count), (int) (sumG / count), (int) (sumB / count)) : Color.TRANSPARENT;
+        } catch (Throwable ignored) {
+            return Color.TRANSPARENT;
+        } finally {
+            if (tiny != null) tiny.recycle();
+        }
+    }
+
+    private static Integer detectUniformBitmapColor(Bitmap bmp, int maxSpread) {
+        if (bmp == null || bmp.getWidth() < 8 || bmp.getHeight() < 8) return null;
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+        int[] pts = {
+                bmp.getPixel(w / 5, h / 5),
+                bmp.getPixel(w / 2, h / 5),
+                bmp.getPixel((4 * w) / 5, h / 5),
+                bmp.getPixel(w / 5, h / 2),
+                bmp.getPixel(w / 2, h / 2),
+                bmp.getPixel((4 * w) / 5, h / 2),
+                bmp.getPixel(w / 5, (4 * h) / 5),
+                bmp.getPixel((4 * w) / 5, (4 * h) / 5)
+        };
+        int sr = 0, sg = 0, sb = 0;
+        for (int c : pts) {
+            if (Color.alpha(c) < 230) return null;
+            sr += Color.red(c);
+            sg += Color.green(c);
+            sb += Color.blue(c);
+        }
+        int ar = sr / pts.length, ag = sg / pts.length, ab = sb / pts.length;
+        for (int c : pts) {
+            if (Math.abs(Color.red(c) - ar) + Math.abs(Color.green(c) - ag) + Math.abs(Color.blue(c) - ab) > maxSpread) {
+                return null;
+            }
+        }
+        return Color.rgb(ar, ag, ab);
     }
 }

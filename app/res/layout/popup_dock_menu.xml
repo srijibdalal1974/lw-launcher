@@ -14,7 +14,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Dock App"
-        android:textColor="#B3FFFFFF"
+        android:textColor="@color/text_on_surface_secondary"
         android:textSize="12sp"
         android:fontFamily="sans-serif-medium"
         android:paddingStart="14dp"
@@ -41,14 +41,15 @@
         <ImageView
             android:layout_width="22dp"
             android:layout_height="22dp"
-            android:src="@drawable/ic_pin" />
+            android:src="@drawable/ic_pin"
+            android:tint="@color/icon_on_surface" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
             android:text="Change App"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_on_surface"
             android:textSize="15sp"
             android:fontFamily="sans-serif-medium" />
     </LinearLayout>
@@ -70,14 +71,15 @@
         <ImageView
             android:layout_width="22dp"
             android:layout_height="22dp"
-            android:src="@drawable/ic_move" />
+            android:src="@drawable/ic_move"
+            android:tint="@color/icon_on_surface" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
             android:text="Drag to Move"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_on_surface"
             android:textSize="15sp"
             android:fontFamily="sans-serif-medium" />
     </LinearLayout>
@@ -99,14 +101,15 @@
         <ImageView
             android:layout_width="22dp"
             android:layout_height="22dp"
-            android:src="@drawable/ic_info" />
+            android:src="@drawable/ic_info"
+            android:tint="@color/icon_on_surface" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
             android:text="App Info"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_on_surface"
             android:textSize="15sp"
             android:fontFamily="sans-serif-medium" />
     </LinearLayout>
@@ -120,6 +123,7 @@
         android:gravity="center_vertical"
         android:paddingStart="14dp"
         android:paddingEnd="14dp"
+        android:layout_marginBottom="2dp"
         android:background="@drawable/popup_item_bg"
         android:clickable="true"
         android:focusable="true">
@@ -127,13 +131,43 @@
         <ImageView
             android:layout_width="22dp"
             android:layout_height="22dp"
-            android:src="@drawable/ic_remove" />
+            android:src="@drawable/ic_remove"
+            android:tint="@color/icon_on_surface" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
             android:text="Remove from Dock"
+            android:textColor="@color/text_on_surface"
+            android:textSize="15sp"
+            android:fontFamily="sans-serif-medium" />
+    </LinearLayout>
+
+    <!-- UNINSTALL -->
+    <LinearLayout
+        android:id="@+id/dock_item_uninstall"
+        android:layout_width="match_parent"
+        android:layout_height="46dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:background="@drawable/popup_item_bg"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_uninstall"
+            android:tint="#FF5252" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:text="Uninstall"
             android:textColor="#FF5252"
             android:textSize="15sp"
             android:fontFamily="sans-serif-medium" />

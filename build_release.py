@@ -45,7 +45,7 @@ def get_sha256(filepath):
 
 def main():
     print("=" * 60)
-    print("  LW Launcher v1.0.3 - Production Release Build Pipeline")
+    print("  LW Launcher v4.0.0 - Production Release Build Pipeline")
     print("  Outputting Signed .AAB (Google Play) & Signed .APK")
     print("=" * 60)
 
@@ -185,35 +185,23 @@ def main():
     )
 
     # Produce versioned assets
-    aab_v2_path = os.path.join(release_dir, "LW_Launcher_v2.aab")
-    apk_v2_path = os.path.join(release_dir, "LW_Launcher_v2.apk")
-    aab_v3_path = os.path.join(release_dir, "LW_Launcher_v3.aab")
-    apk_v3_path = os.path.join(release_dir, "LW_Launcher_v3.apk")
-    aab_v302_path = os.path.join(release_dir, "LW_Launcher_v3.0.2.aab")
-    apk_v302_path = os.path.join(release_dir, "LW_Launcher_v3.0.2.apk")
-    shutil.copy2(aab_path, aab_v2_path)
-    shutil.copy2(apk_path, apk_v2_path)
-    shutil.copy2(aab_path, aab_v3_path)
-    shutil.copy2(apk_path, apk_v3_path)
-    shutil.copy2(aab_path, aab_v302_path)
-    shutil.copy2(apk_path, apk_v302_path)
+    aab_v400_path = os.path.join(release_dir, "LW_Launcher_v4.0.0.aab")
+    apk_v400_path = os.path.join(release_dir, "LW_Launcher_v4.0.0.apk")
+    shutil.copy2(aab_path, aab_v400_path)
+    shutil.copy2(apk_path, apk_v400_path)
 
     # Deliver to Downloads directories
     download_dirs = [
         r"C:\Users\sriji\Downloads\LW_Launcher",
-        r"C:\Users\sriji\Downloads\LW_Launcher_v3",
-        r"C:\Users\sriji\Downloads\LW_Launcher_v2",
-        r"C:\Users\sriji\Downloads\lw laucher v2"
+        r"C:\Users\sriji\Downloads\lw laucher v4.0.0",
     ]
     for d in download_dirs:
         os.makedirs(d, exist_ok=True)
         shutil.copy2(aab_path, os.path.join(d, "LW_Launcher.aab"))
         shutil.copy2(apk_path, os.path.join(d, "LW_Launcher.apk"))
-        shutil.copy2(aab_v3_path, os.path.join(d, "LW_Launcher_v3.aab"))
-        shutil.copy2(apk_v3_path, os.path.join(d, "LW_Launcher_v3.apk"))
-        shutil.copy2(aab_v302_path, os.path.join(d, "LW_Launcher_v3.0.2.aab"))
-        shutil.copy2(apk_v302_path, os.path.join(d, "LW_Launcher_v3.0.2.apk"))
-        print(f"[OK] Delivered v3 release assets to {d}")
+        shutil.copy2(aab_v400_path, os.path.join(d, "LW_Launcher_v4.0.0.aab"))
+        shutil.copy2(apk_v400_path, os.path.join(d, "LW_Launcher_v4.0.0.apk"))
+        print(f"[OK] Delivered v4.0.0 release assets to {d}")
 
     # Summary
     aab_size = os.path.getsize(aab_path)

@@ -1,5 +1,6 @@
 package com.custom.pixellauncher;
 
+import android.Manifest;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -20,24 +21,38 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
+import android.os.SystemClock;
+import android.os.UserHandle;
 import android.provider.CalendarContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
 import android.text.Editable;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.BackgroundColorSpan;
+import android.text.style.ForegroundColorSpan;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
@@ -49,6 +64,7 @@ import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -56,15 +72,19 @@ import android.view.WindowManager;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.EditText;
+import android.widget.Filter;
 import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
+import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.CompoundButton;
 import android.widget.TextView;
@@ -73,17 +93,28 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 
 public class MainActivity extends Activity {
 
@@ -91,9 +122,9 @@ public class MainActivity extends Activity {
     private static final String KEY_PAGES_JSON = "home_pages_json";
     private static final String KEY_PAGE_WIDGETS_JSON = "page_widgets_json";
     private static final String PREF_KEY_GRID_MODE = "pref_grid_mode";
-    public static final int GRID_MODE_4X5 = 0;  // 4 columns x 5 rows (Large 58dp icons - Pixel Standard)
-    public static final int GRID_MODE_5X5 = 1;  // 5 columns x 5 rows (Medium 50dp icons - Pixel Expressive)
-    public static final int GRID_MODE_16X9 = 2; // 9 columns x 16 rows (Compact 34dp icons - Ultra Dense)
+    public static final int GRID_MODE_4X5 = 0;  // 4 columns x 5 rows (Standard 60dp icons - Pixel Standard)
+    public static final int GRID_MODE_5X5 = 1;  // 5 columns x 5 rows (Medium 54dp icons - Pixel Expressive)
+    public static final int GRID_MODE_16X9 = 2; // 9 columns x 16 rows (Compact 36dp icons - Ultra Dense)
     private int currentGridMode = GRID_MODE_4X5;
 
     private int getGridColumns() {
@@ -228,9 +259,17 @@ public class MainActivity extends Activity {
     private View rootLayout;
     private View homeScreen;
     private LinearLayout appDrawer;
+    private View drawerDragHandle;
+    private View drawerSearchBar;
+    private FrameLayout drawerGoogleWidgetContainer;
+    private AppWidgetHostView drawerSearchWidgetHostView;
+    private ImageView ivDrawerSearchIcon;
+    private ImageView btnCloseDrawer;
     private GridView gvApps;
+    private DrawerFastScrollbarView drawerScrollbar;
     private EditText etDrawerSearch;
     private TextView tvDate;
+    private boolean isDrawerVisiblyOpenForBars = false;
 
     private SmoothHomePager hsvHomePages;
     private LinearLayout llHomePages;
@@ -253,9 +292,33 @@ public class MainActivity extends Activity {
     private static final int APPWIDGET_HOST_ID = 2048;
     private static final int REQUEST_BIND_APPWIDGET = 7777;
     private static final int REQUEST_BIND_CUSTOM_APPWIDGET = 7778;
+    private static final int REQUEST_BIND_DRAWER_APPWIDGET = 7779;
+    private static final int REQUEST_LAUNCH_LENS = 7780;
     private static final int REQUEST_PICK_APPWIDGET = 102;
     private static final int REQUEST_CREATE_APPWIDGET = 103;
+    private static final int REQUEST_COARSE_LOCATION = 1104;
+    private static final String PREF_KEY_WEATHER_LOC_PROMPTED = "pref_weather_loc_prompted";
+    private static final String PREF_KEY_DATA_SAVER_PROMPTED = "pref_weather_data_saver_prompted";
+    private LiveWeatherController liveWeatherController;
+    private DisplayManager.DisplayListener displayListener;
+    private LinearLayout llDrawerHeaderOverlay;
+    private LinearLayout llDrawerPredictions;
+    private TextView tvDrawerAllAppsHeader;
+    private TextView tvDrawerTypeaheadHint;
+    private ScrollView svDrawerSearchResults;
+    private LinearLayout llDrawerSearchResultsContent;
+    private ImageView btnDrawerMic;
+    private ImageView btnDrawerLens;
+    private int drawerHeaderHeightPx = 0;
+    private int drawerSearchSeq = 0;
+    private Runnable pendingWebSuggestRunnable;
+    private String lastDrawerSearchQuery = "";
+    private final List<String> lastDrawerSuggestions = new ArrayList<>();
+    private ValueAnimator drawerSearchMarginAnimator;
+    private static final String PREF_KEY_APP_LAUNCH_HISTORY = "pref_app_launch_history";
     private static final String PREF_GOOGLE_WIDGET_ID = "google_search_widget_id";
+    private static final String PREF_DRAWER_GOOGLE_WIDGET_ID = "drawer_google_search_widget_id";
+    private static final String PREF_KEY_DRAWER_USE_GOOGLE_WIDGET = "pref_drawer_use_google_widget";
 
     private static final int SPECIAL_ITEM_NONE = 0;
     private static final int SPECIAL_ITEM_SEARCH_BAR = 1;
@@ -276,12 +339,34 @@ public class MainActivity extends Activity {
     private static final String PREF_KEY_AT_A_GLANCE_ROW = "pref_at_a_glance_row";
     private static final String PREF_KEY_AT_A_GLANCE_COL = "pref_at_a_glance_col";
     private static final String PREF_KEY_V206_MIGRATED = "pref_v206_migrated_grid";
+    private static final String PREF_KEY_V303_COMPACT_GLANCE_MIGRATED = "pref_v303_compact_glance_migrated";
+
+    private static final long LONG_PRESS_ICON_HOLD_MS = 560L;
+    private static final long LONG_PRESS_DRAWER_HOLD_MS = 620L;
+    private static final long LONG_PRESS_SPECIAL_HOLD_MS = 680L;
+    private static final long LONG_PRESS_WIDGET_HOLD_MS = 720L;
+    private static final float DRAG_MOVE_THRESHOLD_ICON_DP = 28f;
+    private static final float DRAG_MOVE_THRESHOLD_SPECIAL_DP = 34f;
+    private static final float EDGE_SCROLL_MARGIN_DP = 28f;
+    private static final long EDGE_SCROLL_HOLD_MS = 620L;
+    private static final long EDGE_SCROLL_COOLDOWN_MS = 700L;
+    private static final long NEW_PAGE_EDGE_COOLDOWN_MS = 1200L;
 
     private Runnable searchBarLongPressRunnable = null;
     private Runnable atAGlanceLongPressRunnable = null;
     private Runnable widgetLongPressRunnable = null;
+    private Runnable pendingDragHoldRunnable = null;
     private float touchDownRawX = 0f;
     private float touchDownRawY = 0f;
+    private long touchDownTimeMs = 0L;
+    private int touchDownSeq = 0;
+    private boolean touchMovedBeyondStillSlop = false;
+    private boolean touchMovedBeyondTapSlop = false;
+    private long lastSwipeEndTimeMs = 0L;
+    private boolean isMultiTouchGesture = false;
+    private boolean isPrimaryPointerDown = false;
+    private int longPressTouchSlopPx = 14;
+    private int tapMoveSlopPx = 21;
     private AppWidgetManager appWidgetManager;
     private AppWidgetHost appWidgetHost;
     private AppWidgetHostView searchWidgetHostView;
@@ -295,6 +380,14 @@ public class MainActivity extends Activity {
     // Navigation bar insets & bottom dock
     private LinearLayout bottomDockContainer;
     private int currentNavBarHeight = 0;
+    private int currentSysGestureEdgePx = 0;
+    private float lastDrawerOpenFraction = 0f;
+    private boolean isEdgeExclusionSuspendedForDrawer = false;
+    private boolean pendingDrawerCollapseOnStop = false;
+    private PopupWindow pendingFolderLaunchPopup = null;
+    private LaunchTransitionView launchTransitionView;
+    private static final long WARM_LAUNCH_WINDOW_MS = 30L * 60L * 1000L;
+    private final Map<String, Long> recentlyLaunchedPackages = new HashMap<>();
 
     // Touch & Drag state (Lawnchair DragLayer)
     private FrameLayout dragOverlay;
@@ -308,6 +401,13 @@ public class MainActivity extends Activity {
     private int activeDropZone = DROP_ZONE_NONE;
     private boolean isDragActive = false;
     private boolean dragMoved = false;
+    private boolean dragStartedFromDrawer = false;
+    private PopupWindow pendingFolderDragPopup = null;
+    private View pendingFolderDragDialogView = null;
+    private FolderInfo pendingDragFolder = null;
+    private int pendingDragFolderPage = -1;
+    private int pendingDragFolderItemIdx = -1;
+    private int pendingDragFolderAppPos = -1;
     private float lastTouchRawX = 0f;
     private float lastTouchRawY = 0f;
     private float dragStartX = 0f;
@@ -345,6 +445,7 @@ public class MainActivity extends Activity {
     private float windowScaleX = 0.94f;
     private float windowScaleY = 0.94f;
     private float lastDragTouchX = 0f;
+    private Object onBackInvokedCallbackProxy = null;
 
     // Android 17 Grouped Widgets state
     private TextView tvBatteryDeviceName;
@@ -368,6 +469,34 @@ public class MainActivity extends Activity {
             if (tvBatteryPct != null) tvBatteryPct.setText(pct + "%");
             if (tvBatteryStatus != null) tvBatteryStatus.setText(isCharging ? "Charging" : "In use");
             if (ivBatteryBolt != null) ivBatteryBolt.setVisibility(isCharging ? View.VISIBLE : View.GONE);
+        }
+    };
+
+    // Live package install/update/uninstall sync state
+    private final ExecutorService appLoaderExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicInteger appLoadSeq = new AtomicInteger(0);
+    private final Map<String, AppInfo> appInfoCache = new HashMap<>();
+    private volatile String loadedAppsSignature = "";
+    private boolean hasLoadedInitialWorkspace = false;
+    private Runnable pendingAppRefreshRunnable = null;
+    private boolean isPackageReceiverRegistered = false;
+    private LauncherApps launcherAppsService = null;
+    private LauncherApps.Callback launcherAppsCallback = null;
+
+    private final BroadcastReceiver packageChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) return;
+            String action = intent.getAction();
+            if (Intent.ACTION_PACKAGE_REMOVED.equals(action)
+                    && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                return;
+            }
+            if ((Intent.ACTION_PACKAGE_REMOVED.equals(action) || Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(action))
+                    && intent.getData() != null) {
+                recentlyLaunchedPackages.remove(intent.getData().getSchemeSpecificPart());
+            }
+            scheduleInstalledAppsRefresh(false, 180L);
         }
     };
 
@@ -395,6 +524,8 @@ public class MainActivity extends Activity {
         );
 
         setContentView(R.layout.activity_launcher);
+        longPressTouchSlopPx = Math.max(8, ViewConfiguration.get(this).getScaledTouchSlop());
+        tapMoveSlopPx = Math.max(longPressTouchSlopPx, Math.round(12f * getResources().getDisplayMetrics().density));
 
         appWidgetManager = AppWidgetManager.getInstance(this);
         appWidgetHost = new AppWidgetHost(this, APPWIDGET_HOST_ID);
@@ -403,6 +534,14 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
 
         currentGridMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(PREF_KEY_GRID_MODE, GRID_MODE_4X5);
+        DisplayRefreshHelper.init(this);
+        DisplayRefreshHelper.applyWindowRefreshPreference(this, false);
+        displayListener = DisplayRefreshHelper.registerDisplayListener(this, new DisplayRefreshHelper.RefreshChangeListener() {
+            @Override
+            public void onRefreshRateChanged(float effectiveHz, float maxSupportedHz) {
+                applyRefreshAdaptedScrollPhysics();
+            }
+        });
 
         initViews();
         setupWindowInsets();
@@ -412,23 +551,130 @@ public class MainActivity extends Activity {
         setupDock();
         setupDrawer();
         setupCustomizationPanel();
+        registerPredictiveBackCallback();
 
         checkFirstRunRolePrompt();
 
-        loadInstalledApps();
+        registerPackageListeners();
+        loadInstalledApps(false);
+
+        liveWeatherController = new LiveWeatherController(this, new LiveWeatherController.Listener() {
+            @Override
+            public void onWeatherUpdated() {
+                refreshGlanceDateText();
+            }
+        });
+        liveWeatherController.refreshIfNeeded(true);
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                maybeRequestWeatherLocationPermission();
+            }
+        }, 700L);
+    }
+
+    private void maybeRequestWeatherLocationPermission() {
+        if (liveWeatherController == null) {
+            return;
+        }
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (!liveWeatherController.hasLocationPermission()
+                && !prefs.getBoolean(PREF_KEY_WEATHER_LOC_PROMPTED, false)) {
+            prefs.edit().putBoolean(PREF_KEY_WEATHER_LOC_PROMPTED, true).apply();
+            try {
+                requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_COARSE_LOCATION);
+                return;
+            } catch (Exception ignored) {}
+        }
+        maybePromptBackgroundDataExemption();
+    }
+
+    private void maybePromptBackgroundDataExemption() {
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing() || isDestroyed() || liveWeatherController == null) {
+                    return;
+                }
+                if (!liveWeatherController.isNetworkPolicyLikelyBlocked()) {
+                    return;
+                }
+                SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                if (prefs.getBoolean(PREF_KEY_DATA_SAVER_PROMPTED, false)) {
+                    return;
+                }
+                prefs.edit().putBoolean(PREF_KEY_DATA_SAVER_PROMPTED, true).apply();
+                try {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Allow Wi-Fi & Mobile Data")
+                            .setMessage("Android is blocking network access for LW Launcher. Turn on Allow network access, Wi-Fi data, Mobile data, and Background data in App Data Usage settings for live At a Glance weather.")
+                            .setPositiveButton("Open Settings", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    LiveWeatherController.openAppNetworkSettings(MainActivity.this);
+                                }
+                            })
+                            .setNegativeButton("Not now", null)
+                            .show();
+                } catch (Exception ignored) {}
+            }
+        }, 3500L);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_COARSE_LOCATION && liveWeatherController != null) {
+            if (grantResults != null && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                liveWeatherController.refreshIfNeeded(true);
+            }
+            maybePromptBackgroundDataExemption();
+        }
     }
 
     private void initViews() {
         rootLayout = findViewById(R.id.root_layout);
         homeScreen = findViewById(R.id.home_screen);
         appDrawer = findViewById(R.id.app_drawer);
+        drawerDragHandle = findViewById(R.id.drawer_drag_handle);
+        drawerSearchBar = findViewById(R.id.drawer_search_bar);
+        drawerGoogleWidgetContainer = findViewById(R.id.drawer_google_widget_container);
+        ivDrawerSearchIcon = findViewById(R.id.iv_drawer_search_icon);
+        tvDrawerTypeaheadHint = findViewById(R.id.tv_drawer_typeahead_hint);
+        svDrawerSearchResults = findViewById(R.id.sv_drawer_search_results);
+        llDrawerSearchResultsContent = findViewById(R.id.ll_drawer_search_results_content);
+        btnDrawerMic = findViewById(R.id.btn_drawer_mic);
+        btnDrawerLens = findViewById(R.id.btn_drawer_lens);
+        btnCloseDrawer = findViewById(R.id.btn_close_drawer);
         gvApps = findViewById(R.id.gv_apps);
+        llDrawerHeaderOverlay = findViewById(R.id.ll_drawer_header_overlay);
+        llDrawerPredictions = findViewById(R.id.ll_drawer_predictions);
+        tvDrawerAllAppsHeader = findViewById(R.id.tv_drawer_all_apps_header);
+        drawerScrollbar = findViewById(R.id.drawer_scrollbar);
         etDrawerSearch = findViewById(R.id.et_drawer_search);
         tvDate = findViewById(R.id.tv_date);
+
+        if (llDrawerHeaderOverlay != null) {
+            drawerHeaderHeightPx = Math.round(134f * getResources().getDisplayMetrics().density);
+            llDrawerHeaderOverlay.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                           int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                    int h = bottom - top;
+                    if (h > 0 && h != drawerHeaderHeightPx && v.getVisibility() == View.VISIBLE) {
+                        drawerHeaderHeightPx = h;
+                        updateDrawerGridPadding();
+                    }
+                }
+            });
+        }
+        applyRefreshAdaptedScrollPhysics();
+        applySystemTheme(getResources().getConfiguration());
 
         bottomDockContainer = findViewById(R.id.bottom_dock_container);
 
         dragOverlay = findViewById(R.id.drag_overlay);
+        launchTransitionView = findViewById(R.id.launch_transition_view);
         ivFloatingDrag = findViewById(R.id.iv_floating_drag);
         llDropTargetsBar = findViewById(R.id.ll_drop_targets_bar);
         dropTargetRemove = findViewById(R.id.drop_target_remove);
@@ -465,18 +711,22 @@ public class MainActivity extends Activity {
         hsvHomePages.setOnScrollChangeListener(new View.OnScrollChangeListener() {
             @Override
             public void onScrollChange(View v, int scrollX, int scrollY, int oldScrollX, int oldScrollY) {
+                int width = getScreenWidth();
+                if (width <= 0 || pages.isEmpty()) return;
+
+                float pageProgress = (float) scrollX / width;
+                applyPageScrollEffects(pageProgress);
+                updatePageDotsContinuous(pageProgress);
+
                 if (hsvHomePages.isAnimatingSnap()) {
                     return;
                 }
-                int width = getScreenWidth();
-                if (width > 0 && pages.size() > 0) {
-                    int activePage = Math.max(0, Math.min(pages.size() - 1, Math.round((float) scrollX / width)));
-                    if (activePage != currentPage) {
-                        currentPage = activePage;
-                        updatePageDots(activePage);
-                        if (isWindowModeActive) {
-                            updateActivePageWindow(activePage);
-                        }
+                int activePage = Math.max(0, Math.min(pages.size() - 1, Math.round(pageProgress)));
+                if (activePage != currentPage) {
+                    currentPage = activePage;
+                    updatePageDots(activePage);
+                    if (isWindowModeActive) {
+                        updateActivePageWindow(activePage);
                     }
                 }
             }
@@ -503,24 +753,96 @@ public class MainActivity extends Activity {
             @Override
             public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
                 int navBarHeight = 0;
+                int statusBarTop = 0;
+                int gestureEdgePx = 0;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     try {
                         navBarHeight = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+                        statusBarTop = insets.getInsets(WindowInsets.Type.statusBars()).top;
+                        android.graphics.Insets sysGesture = insets.getInsets(WindowInsets.Type.systemGestures());
+                        gestureEdgePx = Math.max(sysGesture.left, sysGesture.right);
                     } catch (Throwable t) {
                         navBarHeight = insets.getSystemWindowInsetBottom();
+                        statusBarTop = insets.getSystemWindowInsetTop();
                     }
                 } else {
                     navBarHeight = insets.getSystemWindowInsetBottom();
+                    statusBarTop = insets.getSystemWindowInsetTop();
+                    try {
+                        android.graphics.Insets sysGesture = insets.getSystemGestureInsets();
+                        gestureEdgePx = Math.max(sysGesture.left, sysGesture.right);
+                    } catch (Throwable ignored) {}
                 }
 
+                if (statusBarTop > 0 && homeScreen != null) {
+                    float d = getResources().getDisplayMetrics().density;
+                    int safeTop = Math.max(statusBarTop, Math.round(40f * d));
+                    if (homeScreen.getPaddingTop() != safeTop) {
+                        homeScreen.setPadding(
+                                homeScreen.getPaddingLeft(),
+                                safeTop,
+                                homeScreen.getPaddingRight(),
+                                homeScreen.getPaddingBottom()
+                        );
+                    }
+                }
+
+                if (gestureEdgePx > 0) {
+                    currentSysGestureEdgePx = gestureEdgePx;
+                }
                 if (navBarHeight > 0 || currentNavBarHeight != navBarHeight) {
                     currentNavBarHeight = navBarHeight;
                     applyNavBarInsets(currentNavBarHeight);
                 }
+                updateHomeSystemGestureExclusion();
                 return insets;
             }
         });
+        rootLayout.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if ((right - left) != (oldRight - oldLeft) || (bottom - top) != (oldBottom - oldTop)) {
+                    updateHomeSystemGestureExclusion();
+                }
+            }
+        });
         rootLayout.requestApplyInsets();
+    }
+
+    private void updateHomeSystemGestureExclusion() {
+        if (rootLayout == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        int w = rootLayout.getWidth();
+        int h = rootLayout.getHeight();
+        if (w <= 0 || h <= 0) return;
+
+        boolean drawerOpen = isEdgeExclusionSuspendedForDrawer
+                || isDrawerVisiblyOpenForBars
+                || (appDrawer != null && appDrawer.getVisibility() == View.VISIBLE && lastDrawerOpenFraction > 0.02f);
+        boolean panelOpen = (customizationPanelOverlay != null && customizationPanelOverlay.getVisibility() == View.VISIBLE);
+
+        if (drawerOpen || panelOpen) {
+            rootLayout.setSystemGestureExclusionRects(Collections.<Rect>emptyList());
+            return;
+        }
+
+        float density = getResources().getDisplayMetrics().density;
+        int edgeW = Math.max((int) (44f * density), currentSysGestureEdgePx + (int) (8f * density));
+        // Respect Android's 200dp per-edge cap, placed over the primary Home thumb swipe zone
+        int maxExclH = Math.min((int) (198f * density), Math.max(1, h - (int) (140f * density)));
+        int minTop = (int) (96f * density);
+        int maxBottom = Math.max(minTop + 1, h - Math.max(currentNavBarHeight, (int) (48f * density)));
+        int top = Math.max(minTop, Math.round(h * 0.54f - maxExclH / 2f));
+        int bottom = Math.min(maxBottom, top + maxExclH);
+        if (bottom <= top) {
+            rootLayout.setSystemGestureExclusionRects(Collections.<Rect>emptyList());
+            return;
+        }
+
+        rootLayout.setSystemGestureExclusionRects(Arrays.asList(
+                new Rect(0, top, edgeW, bottom),
+                new Rect(Math.max(0, w - edgeW), top, w, bottom)
+        ));
     }
 
     private int getNavigationBarHeight() {
@@ -532,29 +854,49 @@ public class MainActivity extends Activity {
         return navBarHeight;
     }
 
+    private void applyRefreshAdaptedScrollPhysics() {
+        if (gvApps != null) {
+            gvApps.setFriction(DisplayRefreshHelper.getAdaptedScrollFriction());
+        }
+    }
+
+    private void updateDrawerGridPadding() {
+        if (gvApps == null) return;
+        float rawDensity = getResources().getDisplayMetrics().density;
+        int safeBottom = Math.max(0, currentNavBarHeight);
+        boolean showHeader = (etDrawerSearch == null || etDrawerSearch.length() == 0)
+                && llDrawerPredictions != null
+                && llDrawerPredictions.getChildCount() > 0;
+        int headerPad = drawerHeaderHeightPx > 0 ? drawerHeaderHeightPx : Math.round(134f * rawDensity);
+        int topPad = showHeader ? headerPad : Math.round(6f * rawDensity);
+        int leftPad = Math.round(12f * rawDensity);
+        int rightPad = Math.round(16f * rawDensity);
+        int botPad = safeBottom + Math.round(28f * rawDensity);
+        if (gvApps.getPaddingTop() != topPad || gvApps.getPaddingBottom() != botPad
+                || gvApps.getPaddingLeft() != leftPad || gvApps.getPaddingRight() != rightPad) {
+            gvApps.setPadding(leftPad, topPad, rightPad, botPad);
+            gvApps.setClipToPadding(false);
+        }
+    }
+
     private void applyNavBarInsets(int navBarHeight) {
-        final int density = (int) getResources().getDisplayMetrics().density;
+        final float rawDensity = getResources().getDisplayMetrics().density;
         final int safeBottom = (navBarHeight > 0) ? navBarHeight : 0;
 
-        // Lift bottom dock container above 3-button navigation bar
+        // Lift bottom dock container above 3-button / gesture navigation bar
         if (bottomDockContainer != null) {
+            int sidePad = Math.round(14f * rawDensity);
             bottomDockContainer.setPadding(
-                16 * density,
+                sidePad,
                 0,
-                16 * density,
-                safeBottom + (14 * density)
+                sidePad,
+                safeBottom + Math.round(10f * rawDensity)
             );
         }
 
-        // Lift app drawer grid so the last row (e.g. YT Music) scrolls fully into clear view
-        if (gvApps != null) {
-            gvApps.setPadding(
-                4 * density,
-                4 * density,
-                4 * density,
-                safeBottom + (28 * density)
-            );
-            gvApps.setClipToPadding(false);
+        updateDrawerGridPadding();
+        if (drawerScrollbar != null) {
+            drawerScrollbar.setBottomInsetPx(safeBottom + Math.round(18 * rawDensity));
         }
 
         // Re-adjust grid heights across home pages
@@ -593,11 +935,12 @@ public class MainActivity extends Activity {
         int screenH = getScreenHeight();
         float density = getResources().getDisplayMetrics().density;
         int navH = currentNavBarHeight > 0 ? currentNavBarHeight : getNavigationBarHeight();
-        int usedH = (int) ((76 + 132 + 16 + 14) * density) + navH;
+        int glanceH = isAtAGlanceVisible() ? (int) (68 * density) : 0;
+        int usedH = (int) ((44 + 144 + 16 + 24) * density) + glanceH + navH;
         int availH = screenH - usedH;
         int rows = getGridRows();
         int cellH = availH / rows;
-        int minH = (rows > 10) ? (int) (38 * density) : (int) (84 * density);
+        int minH = (rows > 10) ? (int) (36 * density) : (int) (84 * density);
         if (cellH < minH) {
             cellH = minH;
         }
@@ -629,12 +972,28 @@ public class MainActivity extends Activity {
             final FrameLayout pageContainer = new FrameLayout(this);
             LinearLayout.LayoutParams lpContainer = new LinearLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT);
             pageContainer.setLayoutParams(lpContainer);
-            pageContainer.setPadding(8 * density, 4 * density, 8 * density, 4 * density);
+            pageContainer.setPadding(8 * density, 2 * density, 8 * density, 4 * density);
             pageContainer.setClipToPadding(false);
             pageContainer.setClipChildren(false);
 
+            final LinearLayout pageColumn = new LinearLayout(this);
+            pageColumn.setOrientation(LinearLayout.VERTICAL);
+            pageColumn.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            pageColumn.setClipChildren(false);
+            pageColumn.setClipToPadding(false);
+
+            if (isAtAGlanceVisible() && getAtAGlancePage() == pageIdx) {
+                LinearLayout glanceView = createPageGlanceView();
+                LinearLayout.LayoutParams lpGlance = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                glanceView.setLayoutParams(lpGlance);
+                pageColumn.addView(glanceView);
+                pageGlanceViews.put(pageIdx, glanceView);
+            }
+
             final FrameLayout pageGridCanvas = new FrameLayout(this);
-            pageGridCanvas.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            LinearLayout.LayoutParams lpCanvas = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+            pageGridCanvas.setLayoutParams(lpCanvas);
             pageGridCanvas.setClipChildren(false);
             pageGridCanvas.setClipToPadding(false);
 
@@ -648,6 +1007,8 @@ public class MainActivity extends Activity {
             gv.setClipToPadding(false);
             gv.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
             gv.setGravity(Gravity.CENTER);
+            gv.setSelector(new ColorDrawable(Color.TRANSPARENT));
+            gv.setDrawSelectorOnTop(false);
             gv.setOverScrollMode(View.OVER_SCROLL_NEVER);
             gv.setVerticalScrollBarEnabled(false);
 
@@ -699,13 +1060,15 @@ public class MainActivity extends Activity {
             gv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
                 @Override
                 public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                    if (!isGestureTapEligible()) return;
                     if (pageIdx < pageAdapters.size()) {
                         LauncherItem item = pageAdapters.get(pageIdx).getItem(position);
                         if (item != null) {
                             if (item.type == LauncherItem.TYPE_FOLDER) {
                                 showFolderPopup(view, item.folderInfo, pageIdx, position);
                             } else if (item.appInfo != null) {
-                                launchApp(item.appInfo);
+                                View iconView = view != null ? view.findViewById(R.id.iv_app_icon) : null;
+                                launchApp(item.appInfo, iconView != null ? iconView : view);
                             }
                         }
                     }
@@ -714,19 +1077,34 @@ public class MainActivity extends Activity {
 
             gv.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
                 @Override
-                public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                    if (isDragActive || isWindowModeActive || (hsvHomePages != null && hsvHomePages.isPaging())) {
-                        return true;
+                public boolean onItemLongClick(AdapterView<?> parent, final View view, final int position, long id) {
+                    boolean drawerOpen = (drawerController != null && drawerController.isVisibleOrAnimating());
+                    if (drawerOpen || !canStartGestureDragHold()) {
+                        return false;
                     }
                     if (pageIdx < pages.size() && position < pages.get(pageIdx).size()) {
-                        LauncherItem item = pages.get(pageIdx).get(position);
+                        final LauncherItem item = pages.get(pageIdx).get(position);
                         if (item != null) {
-                            startDragItem(view, item, pageIdx, position);
+                            scheduleDeferredDragHold(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (drawerController == null || !drawerController.isVisibleOrAnimating()) {
+                                        startDragItem(view, item, pageIdx, position);
+                                    }
+                                }
+                            }, LONG_PRESS_ICON_HOLD_MS);
                             return true;
                         } else {
-                            if (!isDragActive && !isWindowModeActive) {
-                                showCustomizationPanel();
-                            }
+                            scheduleDeferredDragHold(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (!isDragActive && !isWindowModeActive
+                                            && (drawerController == null || !drawerController.isVisibleOrAnimating())) {
+                                        dispatchWorkspaceTouchCancel();
+                                        showCustomizationPanel();
+                                    }
+                                }
+                            }, LONG_PRESS_ICON_HOLD_MS);
                             return true;
                         }
                     }
@@ -750,7 +1128,8 @@ public class MainActivity extends Activity {
 
             pageGridCanvas.addView(gv);
             pageGridCanvas.addView(widgetOverlay);
-            pageContainer.addView(pageGridCanvas);
+            pageColumn.addView(pageGridCanvas);
+            pageContainer.addView(pageColumn);
             pageContainer.addView(tvBadge);
             llHomePages.addView(pageContainer);
         }
@@ -760,6 +1139,7 @@ public class MainActivity extends Activity {
     }
 
     private void refreshAllPages() {
+        refreshGlanceDateText();
         for (HomeItemAdapter adapter : pageAdapters) {
             adapter.notifyDataSetChanged();
         }
@@ -849,16 +1229,26 @@ public class MainActivity extends Activity {
             layoutPageDots.setVisibility(View.VISIBLE);
         }
 
-        int density = Math.max(1, (int) getResources().getDisplayMetrics().density);
+        float density = getResources().getDisplayMetrics().density;
+        int inactiveW = Math.max(4, Math.round(5f * density));
+        int activeW = Math.max(10, Math.round(16f * density));
+        int dotH = Math.max(4, Math.round(5f * density));
+        int dotMargin = Math.max(2, Math.round(3f * density));
+
         if (layoutPageDots.getChildCount() != count) {
             layoutPageDots.removeAllViews();
-            int dotBoxSize = 8 * density;
             for (int i = 0; i < count; i++) {
                 final int pageIdx = i;
-                ImageView dot = new ImageView(this);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dotBoxSize, dotBoxSize);
-                lp.setMargins(4 * density, 0, 4 * density, 0);
+                View dot = new View(this);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        i == activePage ? activeW : inactiveW, dotH);
+                lp.setMargins(dotMargin, 0, dotMargin, 0);
                 dot.setLayoutParams(lp);
+                GradientDrawable bg = new GradientDrawable();
+                bg.setShape(GradientDrawable.RECTANGLE);
+                bg.setCornerRadius(dotH * 0.5f);
+                bg.setColor(Color.WHITE);
+                dot.setBackground(bg);
                 dot.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -868,21 +1258,47 @@ public class MainActivity extends Activity {
                 layoutPageDots.addView(dot);
             }
         }
+        updatePageDotsContinuous((float) activePage);
+    }
 
+    private void applyPageScrollEffects(float pageProgress) {
+        if (isWindowModeActive || pageContainers.size() <= 1) return;
+        boolean settled = Math.abs(pageProgress - Math.round(pageProgress)) < 0.005f;
+        for (int i = 0; i < pageContainers.size(); i++) {
+            FrameLayout page = pageContainers.get(i);
+            if (page == null) continue;
+            if (settled) {
+                page.setScaleX(1.0f);
+                page.setScaleY(1.0f);
+                page.setAlpha(1.0f);
+            } else {
+                float dist = Math.min(1.0f, Math.abs(i - pageProgress));
+                float scale = 1.0f - (0.032f * dist);
+                float alpha = 1.0f - (0.14f * dist);
+                page.setScaleX(scale);
+                page.setScaleY(scale);
+                page.setAlpha(alpha);
+            }
+        }
+    }
+
+    private void updatePageDotsContinuous(float pageProgress) {
+        if (layoutPageDots == null || layoutPageDots.getVisibility() != View.VISIBLE) return;
+        float density = getResources().getDisplayMetrics().density;
+        int inactiveW = Math.max(4, Math.round(5f * density));
+        int activeW = Math.max(10, Math.round(16f * density));
+        int count = layoutPageDots.getChildCount();
         for (int i = 0; i < count; i++) {
             View child = layoutPageDots.getChildAt(i);
-            if (!(child instanceof ImageView)) continue;
-            ImageView dot = (ImageView) child;
-            boolean isActive = (i == activePage);
-            Object tag = dot.getTag();
-            if (tag instanceof Boolean && ((Boolean) tag) == isActive) {
-                continue;
+            if (child == null) continue;
+            float proximity = Math.max(0f, 1.0f - Math.abs(i - pageProgress));
+            int targetW = Math.round(inactiveW + (activeW - inactiveW) * proximity);
+            ViewGroup.LayoutParams lp = child.getLayoutParams();
+            if (lp != null && lp.width != targetW) {
+                lp.width = targetW;
+                child.setLayoutParams(lp);
             }
-            dot.setTag(isActive);
-            dot.setImageResource(isActive ? R.drawable.dot_active : R.drawable.dot_inactive);
-            float scale = isActive ? 1.0f : 0.75f;
-            float alpha = isActive ? 1.0f : 0.55f;
-            dot.animate().scaleX(scale).scaleY(scale).alpha(alpha).setDuration(120).start();
+            child.setAlpha(0.45f + (0.55f * proximity));
         }
     }
 
@@ -959,6 +1375,8 @@ public class MainActivity extends Activity {
         hideCustomizationPanel();
         isDragActive = true;
         dragMoved = false;
+        dragStartedFromDrawer = false;
+        clearPendingFolderDragState();
         activeDropZone = DROP_ZONE_NONE;
         edgeHoldStartTime = 0L;
         pendingEdgeDirection = 0;
@@ -969,12 +1387,141 @@ public class MainActivity extends Activity {
         dragSourcePosition = position;
         dragSourceView = view;
         draggedItem = item;
+        draggedSpecialItem = SPECIAL_ITEM_NONE;
 
         Log.d("PixelDrag", "startDragItem: item=" + item.getLabel() + " page=" + pageIdx + " pos=" + position);
 
         if (view != null) {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
+        dispatchWorkspaceTouchCancel();
+        resetIconScaleTarget(view);
+    }
+
+    private void startDragFromDrawer(View view, AppInfo app) {
+        if (app == null || isDragActive) return;
+        startDragItem(view, new LauncherItem(app), -1, -1);
+        dragStartedFromDrawer = true;
+    }
+
+    private void startDragFromFolderPopup(View view, AppInfo app, FolderInfo folder,
+                                          int pageIdx, int itemIdx, int appPos,
+                                          PopupWindow popupWindow, View dialogView) {
+        if (app == null || isDragActive) return;
+        hideCustomizationPanel();
+        isDragActive = true;
+        dragMoved = false;
+        dragStartedFromDrawer = false;
+        pendingFolderDragPopup = popupWindow;
+        pendingFolderDragDialogView = dialogView;
+        pendingDragFolder = folder;
+        pendingDragFolderPage = pageIdx;
+        pendingDragFolderItemIdx = itemIdx;
+        pendingDragFolderAppPos = appPos;
+        activeDropZone = DROP_ZONE_NONE;
+        edgeHoldStartTime = 0L;
+        pendingEdgeDirection = 0;
+        dragStartX = lastTouchRawX;
+        dragStartY = lastTouchRawY;
+        lastDragTouchX = lastTouchRawX;
+        dragSourcePage = -1;
+        dragSourcePosition = -1;
+        dragSourceView = view;
+        draggedItem = new LauncherItem(app);
+        draggedSpecialItem = SPECIAL_ITEM_NONE;
+
+        Log.d("PixelDrag", "startDragFromFolderPopup: item=" + app.label + " folder=" + (folder != null ? folder.name : ""));
+
+        if (view != null) {
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        }
+        resetIconScaleTarget(view);
+    }
+
+    private void clearPendingFolderDragState() {
+        pendingFolderDragPopup = null;
+        pendingFolderDragDialogView = null;
+        pendingDragFolder = null;
+        pendingDragFolderPage = -1;
+        pendingDragFolderItemIdx = -1;
+        pendingDragFolderAppPos = -1;
+    }
+
+    private void commitPendingFolderDragRemoval() {
+        if (pendingFolderDragDialogView != null) {
+            pendingFolderDragDialogView.animate().cancel();
+            pendingFolderDragDialogView.setAlpha(0f);
+        }
+        if (pendingFolderDragPopup != null) {
+            try {
+                pendingFolderDragPopup.setElevation(0f);
+            } catch (Throwable ignored) {}
+        }
+        if (pendingDragFolder != null) {
+            AppInfo removedApp = (draggedItem != null) ? draggedItem.appInfo : null;
+            if (pendingDragFolderAppPos >= 0 && pendingDragFolderAppPos < pendingDragFolder.apps.size()) {
+                AppInfo candidate = pendingDragFolder.apps.get(pendingDragFolderAppPos);
+                if (removedApp == null || (candidate != null && removedApp.packageName.equals(candidate.packageName))) {
+                    pendingDragFolder.apps.remove(pendingDragFolderAppPos);
+                } else {
+                    pendingDragFolder.apps.remove(removedApp);
+                }
+            } else if (removedApp != null) {
+                pendingDragFolder.apps.remove(removedApp);
+            }
+            if (pendingDragFolderPage >= 0 && pendingDragFolderPage < pages.size()
+                    && pendingDragFolderItemIdx >= 0 && pendingDragFolderItemIdx < pages.get(pendingDragFolderPage).size()) {
+                if (pendingDragFolder.apps.size() == 1) {
+                    pages.get(pendingDragFolderPage).set(pendingDragFolderItemIdx, new LauncherItem(pendingDragFolder.apps.get(0)));
+                } else if (pendingDragFolder.apps.isEmpty()) {
+                    pages.get(pendingDragFolderPage).set(pendingDragFolderItemIdx, null);
+                }
+            }
+            cleanupFoldersOnAllPages();
+            savePages();
+            for (HomeItemAdapter adapter : pageAdapters) {
+                adapter.notifyDataSetChanged();
+            }
+            pendingDragFolder = null;
+            pendingDragFolderPage = -1;
+            pendingDragFolderItemIdx = -1;
+            pendingDragFolderAppPos = -1;
+        }
+    }
+
+    private void resetIconScaleTarget(View view) {
+        if (view == null) return;
+        View iconTarget = view.findViewById(R.id.iv_app_icon);
+        View target = (iconTarget != null) ? iconTarget : view;
+        target.animate().cancel();
+        target.setScaleX(1.0f);
+        target.setScaleY(1.0f);
+        view.setPressed(false);
+    }
+
+    private void dispatchWorkspaceTouchCancel() {
+        long now = SystemClock.uptimeMillis();
+        MotionEvent cancelEv = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, lastTouchRawX, lastTouchRawY, 0);
+        try {
+            MainActivity.super.dispatchTouchEvent(cancelEv);
+        } catch (Throwable ignored) {}
+        cancelEv.recycle();
+    }
+
+    private void cancelUnmovedDrag() {
+        if (!isDragActive || dragMoved) return;
+        isDragActive = false;
+        dragStartedFromDrawer = false;
+        draggedSpecialItem = SPECIAL_ITEM_NONE;
+        draggedWidgetId = -1;
+        draggedWidgetSourcePage = -1;
+        if (dragSourceView != null) {
+            dragSourceView.setAlpha(1.0f);
+            resetIconScaleTarget(dragSourceView);
+            dragSourceView = null;
+        }
+        draggedItem = null;
+        clearPendingFolderDragState();
     }
 
     private void startDragSpecialItem(int type, String label, View view) {
@@ -982,6 +1529,8 @@ public class MainActivity extends Activity {
         hideCustomizationPanel();
         isDragActive = true;
         dragMoved = false;
+        dragStartedFromDrawer = false;
+        clearPendingFolderDragState();
         activeDropZone = DROP_ZONE_NONE;
         edgeHoldStartTime = 0L;
         pendingEdgeDirection = 0;
@@ -999,6 +1548,7 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
+        dispatchWorkspaceTouchCancel();
     }
 
     private void startDragWidget(int sourcePage, int widgetId, String label, int spanCols, int spanRows, View view) {
@@ -1006,6 +1556,8 @@ public class MainActivity extends Activity {
         hideCustomizationPanel();
         isDragActive = true;
         dragMoved = false;
+        dragStartedFromDrawer = false;
+        clearPendingFolderDragState();
         activeDropZone = DROP_ZONE_NONE;
         edgeHoldStartTime = 0L;
         pendingEdgeDirection = 0;
@@ -1028,6 +1580,7 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
+        dispatchWorkspaceTouchCancel();
     }
 
     private void startDragDockApp(int slot, AppInfo app, View view) {
@@ -1035,6 +1588,8 @@ public class MainActivity extends Activity {
         hideCustomizationPanel();
         isDragActive = true;
         dragMoved = false;
+        dragStartedFromDrawer = false;
+        clearPendingFolderDragState();
         activeDropZone = DROP_ZONE_NONE;
         edgeHoldStartTime = 0L;
         pendingEdgeDirection = 0;
@@ -1052,20 +1607,35 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
+        dispatchWorkspaceTouchCancel();
+        resetIconScaleTarget(view);
     }
 
     private boolean isTouchInsideView(View v, float rawX, float rawY) {
+        return isTouchInsideView(v, rawX, rawY, 6f);
+    }
+
+    private boolean isTouchInsideView(View v, float rawX, float rawY, float slopDp) {
         if (v == null || v.getVisibility() != View.VISIBLE) return false;
         int[] loc = new int[2];
         v.getLocationOnScreen(loc);
-        int slop = (int) (14 * getResources().getDisplayMetrics().density);
+        int slop = (int) (slopDp * getResources().getDisplayMetrics().density);
         return (rawX >= loc[0] - slop && rawX <= loc[0] + v.getWidth() + slop &&
                 rawY >= loc[1] - slop && rawY <= loc[1] + v.getHeight() + slop);
+    }
+
+    private boolean isDropTargetHit(View v, float rawX, float rawY, float density) {
+        if (v == null || v.getVisibility() != View.VISIBLE) return false;
+        return isTouchInsideView(v, rawX, rawY, 10f)
+                || isTouchInsideView(v, rawX, rawY - (28f * density), 6f);
     }
 
     private void highlightDropTarget(View v, int bgRes) {
         if (v != null) {
             v.setBackgroundResource(bgRes);
+            if (v == dropTargetUninstall) {
+                updateDropUninstallContrast(true);
+            }
             v.animate().scaleX(1.08f).scaleY(1.08f).setDuration(120).start();
         }
     }
@@ -1073,8 +1643,20 @@ public class MainActivity extends Activity {
     private void unhighlightDropTarget(View v, int bgRes) {
         if (v != null) {
             v.setBackgroundResource(bgRes);
+            if (v == dropTargetUninstall) {
+                updateDropUninstallContrast(false);
+            }
             v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start();
         }
+    }
+
+    private void updateDropUninstallContrast(boolean highlighted) {
+        if (dropTargetUninstall == null) return;
+        int fgColor = highlighted ? Color.WHITE : Color.parseColor("#FF5252");
+        ImageView iv = dropTargetUninstall.findViewById(R.id.iv_drop_uninstall_icon);
+        TextView tv = dropTargetUninstall.findViewById(R.id.tv_drop_uninstall_label);
+        if (iv != null) iv.setColorFilter(fgColor);
+        if (tv != null) tv.setTextColor(fgColor);
     }
 
     private void handleDragTouchEvent(MotionEvent ev) {
@@ -1085,16 +1667,31 @@ public class MainActivity extends Activity {
         int offsetY = (int) (36 * density);
 
         switch (action) {
+            case MotionEvent.ACTION_POINTER_DOWN:
+                if (!dragMoved) {
+                    isMultiTouchGesture = true;
+                    cancelUnmovedDrag();
+                }
+                break;
+
             case MotionEvent.ACTION_MOVE:
                 float dx = ev.getRawX() - dragStartX;
                 float dy = ev.getRawY() - dragStartY;
                 float dist = (float) Math.hypot(dx, dy);
+                float moveThresholdPx = ((draggedSpecialItem != SPECIAL_ITEM_NONE)
+                        ? DRAG_MOVE_THRESHOLD_SPECIAL_DP
+                        : DRAG_MOVE_THRESHOLD_ICON_DP) * density;
 
-                if (!dragMoved && dist > 14 * density) {
+                if (!dragMoved && dist > moveThresholdPx) {
                     dragMoved = true;
                     lastDragTouchX = ev.getRawX();
 
-                    if (dragSourceView != null) {
+                    if (dragStartedFromDrawer) {
+                        closeAppDrawer();
+                    }
+                    if (pendingDragFolder != null || pendingFolderDragPopup != null) {
+                        commitPendingFolderDragRemoval();
+                    } else if (dragSourceView != null) {
                         dragSourceView.setAlpha(0.25f);
                     }
 
@@ -1115,21 +1712,33 @@ public class MainActivity extends Activity {
 
                         ivFloatingDrag.setX(ev.getRawX() - halfSize);
                         ivFloatingDrag.setY(ev.getRawY() - halfSize - offsetY);
-                        ivFloatingDrag.setScaleX(1.15f);
-                        ivFloatingDrag.setScaleY(1.15f);
+                        ivFloatingDrag.setScaleX(1.0f);
+                        ivFloatingDrag.setScaleY(1.0f);
+                        ivFloatingDrag.setAlpha(0.88f);
                         ivFloatingDrag.setRotation(0f);
+                        ivFloatingDrag.animate()
+                                .scaleX(1.16f)
+                                .scaleY(1.16f)
+                                .alpha(1.0f)
+                                .setDuration(140)
+                                .setInterpolator(new OvershootInterpolator(1.45f))
+                                .start();
                     }
 
+                    boolean canUninstall = (draggedSpecialItem == SPECIAL_ITEM_NONE)
+                            && draggedItem != null
+                            && draggedItem.type == LauncherItem.TYPE_APP
+                            && draggedItem.appInfo != null
+                            && isAppUninstallable(draggedItem.appInfo.packageName);
+                    boolean canRemove = (draggedSpecialItem != SPECIAL_ITEM_NONE) || !dragStartedFromDrawer;
+
                     if (dropTargetRemove != null) {
-                        dropTargetRemove.setBackgroundResource(R.drawable.drop_target_bg);
-                        dropTargetRemove.setScaleX(1.0f);
-                        dropTargetRemove.setScaleY(1.0f);
+                        dropTargetRemove.setVisibility(canRemove ? View.VISIBLE : View.GONE);
+                        unhighlightDropTarget(dropTargetRemove, R.drawable.drop_target_bg);
                     }
                     if (dropTargetUninstall != null) {
-                        dropTargetUninstall.setVisibility(draggedSpecialItem == SPECIAL_ITEM_NONE ? View.VISIBLE : View.GONE);
-                        dropTargetUninstall.setBackgroundResource(R.drawable.drop_target_bg);
-                        dropTargetUninstall.setScaleX(1.0f);
-                        dropTargetUninstall.setScaleY(1.0f);
+                        dropTargetUninstall.setVisibility(canUninstall ? View.VISIBLE : View.GONE);
+                        unhighlightDropTarget(dropTargetUninstall, R.drawable.drop_target_bg);
                     }
 
                     if (dragOverlay != null) {
@@ -1137,10 +1746,14 @@ public class MainActivity extends Activity {
                     }
 
                     if (llDropTargetsBar != null) {
-                        llDropTargetsBar.setVisibility(View.VISIBLE);
-                        llDropTargetsBar.setAlpha(0f);
-                        llDropTargetsBar.setTranslationY(-30f * density);
-                        llDropTargetsBar.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();
+                        if (canRemove || canUninstall) {
+                            llDropTargetsBar.setVisibility(View.VISIBLE);
+                            llDropTargetsBar.setAlpha(0f);
+                            llDropTargetsBar.setTranslationY(-30f * density);
+                            llDropTargetsBar.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();
+                        } else {
+                            llDropTargetsBar.setVisibility(View.GONE);
+                        }
                     }
 
                     enterPageWindowMode();
@@ -1160,8 +1773,8 @@ public class MainActivity extends Activity {
                         ivFloatingDrag.setRotation(newRot);
                     }
 
-                    boolean isOverRemove = isTouchInsideView(dropTargetRemove, ev.getRawX(), ev.getRawY());
-                    boolean isOverUninstall = isTouchInsideView(dropTargetUninstall, ev.getRawX(), ev.getRawY());
+                    boolean isOverRemove = isDropTargetHit(dropTargetRemove, ev.getRawX(), ev.getRawY(), density);
+                    boolean isOverUninstall = isDropTargetHit(dropTargetUninstall, ev.getRawX(), ev.getRawY(), density);
 
                     if (isOverRemove) {
                         if (activeDropZone != DROP_ZONE_REMOVE) {
@@ -1186,10 +1799,10 @@ public class MainActivity extends Activity {
                             unhighlightDropTarget(dropTargetUninstall, R.drawable.drop_target_bg);
                         }
 
-                        // Intentional, refined edge scrolling (36dp margin, 500ms hold dwell)
+                        // Intentional, deliberate edge scrolling so icons dragged to outer columns don't flip pages accidentally
                         long now = System.currentTimeMillis();
                         int screenW = getScreenWidth();
-                        float edgeThreshold = 36 * density;
+                        float edgeThreshold = EDGE_SCROLL_MARGIN_DP * density;
 
                         int currentEdgeDir = 0;
                         if (ev.getRawX() > screenW - edgeThreshold) {
@@ -1203,13 +1816,13 @@ public class MainActivity extends Activity {
                                 pendingEdgeDirection = currentEdgeDir;
                                 edgeHoldStartTime = now;
                             } else {
-                                if (now - edgeHoldStartTime >= 420 && now - lastEdgeScrollTime > 550) {
+                                if (now - edgeHoldStartTime >= EDGE_SCROLL_HOLD_MS && now - lastEdgeScrollTime > EDGE_SCROLL_COOLDOWN_MS) {
                                     if (pendingEdgeDirection == 1) {
                                         if (currentPage < pages.size() - 1) {
                                             scrollToPage(currentPage + 1);
                                             lastEdgeScrollTime = now;
                                             edgeHoldStartTime = now;
-                                        } else if (pages.size() < 7 && now - lastEdgeScrollTime > 1000) {
+                                        } else if (pages.size() < 7 && now - lastEdgeScrollTime > NEW_PAGE_EDGE_COOLDOWN_MS) {
                                             int newPageIdx = addNewPage();
                                             scrollToPage(newPageIdx);
                                             lastEdgeScrollTime = now;
@@ -1233,7 +1846,7 @@ public class MainActivity extends Activity {
                         int hoveredChipIdx = -1;
                         for (int c = 0; c < dragChipViews.size(); c++) {
                             TextView chip = dragChipViews.get(c);
-                            if (isTouchInsideView(chip, ev.getRawX(), ev.getRawY())) {
+                            if (isTouchInsideView(chip, ev.getRawX(), ev.getRawY(), 8f)) {
                                 hoveredChipIdx = c;
                                 break;
                             }
@@ -1244,7 +1857,7 @@ public class MainActivity extends Activity {
                                 scrollToPage(hoveredChipIdx);
                                 lastEdgeScrollTime = now;
                             }
-                        } else if (dragChipDotsView != null && isTouchInsideView(dragChipDotsView, ev.getRawX(), ev.getRawY())) {
+                        } else if (dragChipDotsView != null && isTouchInsideView(dragChipDotsView, ev.getRawX(), ev.getRawY(), 8f)) {
                             if (now - lastEdgeScrollTime > 400 && pages.size() < 7) {
                                 int np = addNewPage();
                                 scrollToPage(np);
@@ -1401,7 +2014,20 @@ public class MainActivity extends Activity {
         }
         if (draggedSpecialItem == SPECIAL_ITEM_CALENDAR) {
             clearHoverHighlight();
-            updateOverlayGhostPreview(rawX, rawY, getGlanceSpanCols(), getGlanceSpanRows(), -1, true);
+            hideAllGhostPreviews();
+            if (currentPage >= 0 && currentPage < pageGhostPreviews.size() && currentPage != getAtAGlancePage()) {
+                View ghost = pageGhostPreviews.get(currentPage);
+                if (ghost != null) {
+                    float density = getResources().getDisplayMetrics().density;
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, (int) (56 * density));
+                    lp.leftMargin = (int) (8 * density);
+                    lp.rightMargin = (int) (8 * density);
+                    lp.topMargin = (int) (4 * density);
+                    ghost.setLayoutParams(lp);
+                    ghost.setVisibility(View.VISIBLE);
+                }
+            }
             return;
         }
         if (draggedSpecialItem == SPECIAL_ITEM_WIDGET) {
@@ -1436,10 +2062,10 @@ public class MainActivity extends Activity {
                         currentHoverView = targetChild;
                         LauncherItem targetItem = currPageList.get(pos);
                         if (targetItem != null) {
-                            currentHoverView.animate().scaleX(1.15f).scaleY(1.15f).setDuration(120).start();
+                            currentHoverView.animate().scaleX(1.15f).scaleY(1.15f).setDuration(140).setInterpolator(new OvershootInterpolator(1.6f)).start();
                         } else {
                             currentHoverView.setBackgroundResource(R.drawable.drop_target_bg);
-                            currentHoverView.animate().scaleX(1.05f).scaleY(1.05f).setDuration(120).start();
+                            currentHoverView.animate().scaleX(1.05f).scaleY(1.05f).setDuration(130).setInterpolator(new DecelerateInterpolator(1.5f)).start();
                         }
                     }
                     return;
@@ -1460,6 +2086,16 @@ public class MainActivity extends Activity {
     private void endDrag(float rawX, float rawY) {
         clearHoverHighlight();
         hideAllGhostPreviews();
+        isPrimaryPointerDown = false;
+        cancelPendingLongPressRunnables();
+
+        float dropDensity = getResources().getDisplayMetrics().density;
+        boolean dropBarVisible = (llDropTargetsBar != null && llDropTargetsBar.getVisibility() == View.VISIBLE);
+        boolean hitRemoveDrop = dropBarVisible && (activeDropZone == DROP_ZONE_REMOVE
+                || isDropTargetHit(dropTargetRemove, rawX, rawY, dropDensity));
+        boolean hitUninstallDrop = dropBarVisible && (activeDropZone == DROP_ZONE_UNINSTALL
+                || isDropTargetHit(dropTargetUninstall, rawX, rawY, dropDensity));
+        activeDropZone = DROP_ZONE_NONE;
 
         if (ivFloatingDrag != null) {
             ivFloatingDrag.animate().rotation(0f).scaleX(1.0f).scaleY(1.0f).setDuration(160).start();
@@ -1468,12 +2104,18 @@ public class MainActivity extends Activity {
         if (llDropTargetsBar != null) {
             llDropTargetsBar.setVisibility(View.GONE);
         }
+        if (dropTargetRemove != null) {
+            dropTargetRemove.setVisibility(View.VISIBLE);
+            unhighlightDropTarget(dropTargetRemove, R.drawable.drop_target_bg);
+        }
         if (dropTargetUninstall != null) {
             dropTargetUninstall.setVisibility(View.VISIBLE);
+            unhighlightDropTarget(dropTargetUninstall, R.drawable.drop_target_bg);
         }
 
         if (dragSourceView != null) {
             dragSourceView.setAlpha(1.0f);
+            resetIconScaleTarget(dragSourceView);
         }
         if (dragOverlay != null) {
             dragOverlay.setVisibility(View.GONE);
@@ -1483,8 +2125,13 @@ public class MainActivity extends Activity {
         edgeHoldStartTime = 0L;
         pendingEdgeDirection = 0;
 
+        boolean fromDrawer = dragStartedFromDrawer;
+        dragStartedFromDrawer = false;
+
         if (!dragMoved) {
-            Log.d("PixelDrag", "endDrag without move: showing popup directly without blur");
+            boolean wasPendingFolderPopup = (pendingFolderDragPopup != null || pendingDragFolder != null);
+            clearPendingFolderDragState();
+            Log.d("PixelDrag", "endDrag without move: no accidental reorder or drop");
             if (draggedSpecialItem != SPECIAL_ITEM_NONE) {
                 draggedSpecialItem = SPECIAL_ITEM_NONE;
                 draggedWidgetId = -1;
@@ -1492,11 +2139,22 @@ public class MainActivity extends Activity {
                 if (dragSourceView != null) dragSourceView.setAlpha(1.0f);
                 return;
             }
+            if (wasPendingFolderPopup) {
+                return;
+            }
+            if (fromDrawer && draggedItem != null && draggedItem.type == LauncherItem.TYPE_APP && draggedItem.appInfo != null) {
+                View anchor = (dragSourceView != null && dragSourceView.isAttachedToWindow()) ? dragSourceView : rootLayout;
+                showPixelPopup(anchor, draggedItem.appInfo, -1, -1);
+                return;
+            }
             if (dragSourcePage == -1 && draggedItem != null) {
                 addItemToCurrentPage(draggedItem);
             }
             if (dragSourcePage == DRAG_SOURCE_DOCK) {
                 if (dragSourceView != null) dragSourceView.setAlpha(1.0f);
+                if (draggedItem != null && draggedItem.appInfo != null) {
+                    showDockOptionsPopup(dragSourceView, dragSourcePosition, draggedItem.appInfo);
+                }
                 return;
             }
             if (draggedItem != null) {
@@ -1509,6 +2167,16 @@ public class MainActivity extends Activity {
             return;
         }
 
+        if (pendingFolderDragPopup != null) {
+            PopupWindow popupToDismiss = pendingFolderDragPopup;
+            clearPendingFolderDragState();
+            try {
+                popupToDismiss.dismiss();
+            } catch (Exception ignored) {}
+        } else {
+            clearPendingFolderDragState();
+        }
+
         float dragScaleX = isWindowModeActive ? windowScaleX : 1.0f;
         float dragScaleY = isWindowModeActive ? windowScaleY : 1.0f;
         exitPageWindowMode();
@@ -1516,7 +2184,7 @@ public class MainActivity extends Activity {
         // Check if dropped onto page chips
         int droppedChipIdx = -1;
         for (int c = 0; c < dragChipViews.size(); c++) {
-            if (isTouchInsideView(dragChipViews.get(c), rawX, rawY)) {
+            if (isTouchInsideView(dragChipViews.get(c), rawX, rawY, 8f)) {
                 droppedChipIdx = c;
                 break;
             }
@@ -1534,11 +2202,10 @@ public class MainActivity extends Activity {
             draggedWidgetId = -1;
             draggedWidgetSourcePage = -1;
 
-            boolean isOverRemove = (activeDropZone == DROP_ZONE_REMOVE || isTouchInsideView(dropTargetRemove, rawX, rawY));
             float screenH = getScreenHeight();
 
             if (specialType == SPECIAL_ITEM_SEARCH_BAR) {
-                if (isOverRemove) {
+                if (hitRemoveDrop) {
                     setSearchBarVisible(false);
                     Toast.makeText(this, "Removed Google Search Bar", Toast.LENGTH_SHORT).show();
                 } else if (rawY < screenH * 0.5f) {
@@ -1550,25 +2217,16 @@ public class MainActivity extends Activity {
                 }
                 return;
             } else if (specialType == SPECIAL_ITEM_CALENDAR) {
-                if (isOverRemove) {
+                if (hitRemoveDrop) {
                     setAtAGlanceVisible(false);
                     Toast.makeText(this, "Removed Calendar from Home screen", Toast.LENGTH_SHORT).show();
                 } else {
-                    int gSpanC = getGlanceSpanCols();
-                    int gSpanR = getGlanceSpanRows();
-                    GridView targetGv = (targetPage >= 0 && targetPage < pageGridViews.size()) ? pageGridViews.get(targetPage) : null;
-                    int[] desired = (droppedChipIdx >= 0 || targetGv == null)
-                            ? new int[]{0, 0}
-                            : computeDropGridOrigin(targetGv, rawX, rawY, gSpanC, gSpanR);
-                    int[] best = findBestOverlaySlot(targetPage, desired[0], desired[1], gSpanC, gSpanR, -1, true);
-                    pushAppsOutOfOverlayRect(targetPage, best[0], best[1], gSpanC, gSpanR);
-                    setAtAGlancePlacement(targetPage, best[0], best[1]);
-                    if (droppedChipIdx >= 0) scrollToPage(targetPage);
-                    Toast.makeText(this, "Placed Calendar on Page " + (targetPage + 1) + " (Row " + (best[1] + 1) + ")", Toast.LENGTH_SHORT).show();
+                    setAtAGlancePlacement(targetPage, 0, 0);
+                    Toast.makeText(this, "Placed At a Glance on Page " + (targetPage + 1), Toast.LENGTH_SHORT).show();
                 }
                 return;
             } else if (specialType == SPECIAL_ITEM_WIDGET) {
-                if (isOverRemove) {
+                if (hitRemoveDrop) {
                     removeWidgetFromPage(widgetSrcPage, widgetId);
                     Toast.makeText(this, "Removed " + wLabel, Toast.LENGTH_SHORT).show();
                 } else {
@@ -1591,8 +2249,8 @@ public class MainActivity extends Activity {
 
         if (draggedItem == null) return;
 
-        // Check if dropped onto Remove target
-        if (activeDropZone == DROP_ZONE_REMOVE || isTouchInsideView(dropTargetRemove, rawX, rawY)) {
+        // Check if dropped onto Remove target (does not uninstall the app)
+        if (hitRemoveDrop) {
             if (dragSourcePage == DRAG_SOURCE_DOCK) {
                 setDockApp(dragSourcePosition, null);
                 Toast.makeText(this, "Removed " + draggedItem.getLabel() + " from Dock", Toast.LENGTH_SHORT).show();
@@ -1608,23 +2266,10 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Check if dropped onto Uninstall target
-        if (activeDropZone == DROP_ZONE_UNINSTALL || isTouchInsideView(dropTargetUninstall, rawX, rawY)) {
-            if (dragSourcePage == DRAG_SOURCE_DOCK) {
-                setDockApp(dragSourcePosition, null);
-            }
+        // Check if dropped onto Uninstall target: prompt system uninstaller first; only remove shortcuts when Android confirms removal
+        if (hitUninstallDrop) {
             if (draggedItem.type == LauncherItem.TYPE_APP && draggedItem.appInfo != null) {
-                removeAppFromAllPages(draggedItem.appInfo.packageName);
-                pruneEmptyTrailingPages();
-                savePages();
-                refreshAllPages();
-                try {
-                    Intent intent = new Intent(Intent.ACTION_DELETE);
-                    intent.setData(Uri.parse("package:" + draggedItem.appInfo.packageName));
-                    startActivity(intent);
-                } catch (Exception e) {
-                    Toast.makeText(this, "Could not start uninstallation", Toast.LENGTH_SHORT).show();
-                }
+                requestAppUninstall(draggedItem.appInfo);
             } else if (draggedItem.type == LauncherItem.TYPE_FOLDER) {
                 Toast.makeText(this, "Cannot uninstall a folder", Toast.LENGTH_SHORT).show();
             }
@@ -1633,7 +2278,7 @@ public class MainActivity extends Activity {
 
         // Check if dropped onto dock
         View dockContainer = findViewById(R.id.dock_icons);
-        if (dockContainer != null && isTouchInsideView(dockContainer, rawX, rawY)) {
+        if (dockContainer != null && isTouchInsideView(dockContainer, rawX, rawY, 8f)) {
             if (draggedItem.type == LauncherItem.TYPE_APP && draggedItem.appInfo != null) {
                 int[] dockLoc = new int[2];
                 dockContainer.getLocationOnScreen(dockLoc);
@@ -1687,7 +2332,7 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Moved " + draggedItem.getLabel() + " to Page " + (droppedChipIdx + 1), Toast.LENGTH_SHORT).show();
                 return;
             }
-        } else if (dragChipDotsView != null && isTouchInsideView(dragChipDotsView, rawX, rawY)) {
+        } else if (dragChipDotsView != null && isTouchInsideView(dragChipDotsView, rawX, rawY, 8f)) {
             int np = addNewPage();
             if (dragSourcePage == DRAG_SOURCE_DOCK) {
                 setDockApp(dragSourcePosition, null);
@@ -1954,18 +2599,29 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Moved " + app.label + " to Page " + (toPage + 1), Toast.LENGTH_SHORT).show();
     }
 
-    private void animatePopIn(final View view) {
-        if (view == null) return;
-        view.setScaleX(0.75f);
-        view.setScaleY(0.75f);
-        view.setAlpha(0f);
-        view.animate()
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setDuration(220)
-                .setInterpolator(new OvershootInterpolator(1.3f))
-                .start();
+    private void preparePixelPopupWindow(PopupWindow popupWindow, float elevationPx) {
+        if (popupWindow == null) return;
+        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popupWindow.setElevation(elevationPx);
+        popupWindow.setAnimationStyle(0);
+        DisplayRefreshHelper.requestInteractiveBoost(this, true);
+    }
+
+    private void animateAnchoredPopupIn(View popupView, View anchor, int popupX, int popupY, int popupW) {
+        float pivotFracX = 0.5f;
+        float pivotFracY = 0.88f;
+        float startOffsetYDp = 10f;
+        if (anchor != null && popupW > 0) {
+            int[] pos = new int[2];
+            anchor.getLocationOnScreen(pos);
+            float anchorCenterX = pos[0] + anchor.getWidth() * 0.5f;
+            float anchorCenterY = pos[1] + anchor.getHeight() * 0.5f;
+            pivotFracX = Math.max(0.12f, Math.min(0.88f, (anchorCenterX - popupX) / (float) popupW));
+            boolean opensBelow = popupY >= anchorCenterY;
+            pivotFracY = opensBelow ? 0.08f : 0.92f;
+            startOffsetYDp = opensBelow ? -10f : 10f;
+        }
+        UiMotion.animatePopIn(popupView, pivotFracX, pivotFracY, startOffsetYDp);
     }
 
     private void showPixelPopup(final View anchor, final AppInfo app, final int pageIndex, final int itemIndex) {
@@ -1976,8 +2632,7 @@ public class MainActivity extends Activity {
                 (int) (230 * getResources().getDisplayMetrics().density),
                 ViewGroup.LayoutParams.WRAP_CONTENT, true);
 
-        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popupWindow.setElevation(24f);
+        preparePixelPopupWindow(popupWindow, 24f);
 
         // App Info
         popupView.findViewById(R.id.popup_item_info).setOnClickListener(new View.OnClickListener() {
@@ -1999,6 +2654,7 @@ public class MainActivity extends Activity {
         llChips.removeAllViews();
         int density = (int) getResources().getDisplayMetrics().density;
 
+        final boolean isNight = LauncherTheme.isNightMode(this);
         for (int p = 0; p < pages.size(); p++) {
             final int targetPage = p;
             TextView chip = new TextView(this);
@@ -2007,7 +2663,7 @@ public class MainActivity extends Activity {
             chip.setLayoutParams(lp);
             chip.setGravity(Gravity.CENTER);
             chip.setText(String.valueOf(p + 1));
-            chip.setTextColor(Color.WHITE);
+            chip.setTextColor(pageIndex == targetPage ? Color.WHITE : LauncherTheme.textPrimary(isNight));
             chip.setTextSize(13);
             chip.setBackgroundResource(pageIndex == targetPage ? R.drawable.chip_page_active_bg : R.drawable.chip_page_bg);
             chip.setOnClickListener(new View.OnClickListener() {
@@ -2028,7 +2684,7 @@ public class MainActivity extends Activity {
             addChip.setLayoutParams(lp);
             addChip.setGravity(Gravity.CENTER);
             addChip.setText("+");
-            addChip.setTextColor(Color.WHITE);
+            addChip.setTextColor(LauncherTheme.textPrimary(isNight));
             addChip.setTextSize(14);
             addChip.setBackgroundResource(R.drawable.chip_page_bg);
             addChip.setOnClickListener(new View.OnClickListener() {
@@ -2088,20 +2744,22 @@ public class MainActivity extends Activity {
             });
         }
 
-        // Uninstall
-        popupView.findViewById(R.id.popup_item_uninstall).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                popupWindow.dismiss();
-                try {
-                    Intent intent = new Intent(Intent.ACTION_DELETE);
-                    intent.setData(Uri.parse("package:" + app.packageName));
-                    startActivity(intent);
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "Could not start uninstallation", Toast.LENGTH_SHORT).show();
-                }
+        // Uninstall (hidden for system apps to match Pixel Launcher)
+        View uninstallRow = popupView.findViewById(R.id.popup_item_uninstall);
+        if (uninstallRow != null) {
+            if (isAppUninstallable(app.packageName)) {
+                uninstallRow.setVisibility(View.VISIBLE);
+                uninstallRow.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        popupWindow.dismiss();
+                        requestAppUninstall(app);
+                    }
+                });
+            } else {
+                uninstallRow.setVisibility(View.GONE);
             }
-        });
+        }
 
         int anchorX = (int) lastTouchRawX;
         int anchorY = (int) lastTouchRawY;
@@ -2120,7 +2778,42 @@ public class MainActivity extends Activity {
         }
 
         popupWindow.showAtLocation(rootLayout, Gravity.NO_GRAVITY, x, y);
-        animatePopIn(popupView);
+        animateAnchoredPopupIn(popupView, anchor, x, y, popupW);
+    }
+
+    private boolean isAppUninstallable(String packageName) {
+        if (packageName == null || packageName.isEmpty() || packageName.equals(getPackageName())) {
+            return false;
+        }
+        try {
+            ApplicationInfo ai = getPackageManager().getApplicationInfo(packageName, 0);
+            return (ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void requestAppUninstall(AppInfo app) {
+        if (app == null || app.packageName == null || app.packageName.isEmpty()) return;
+        if (!isAppUninstallable(app.packageName)) {
+            Toast.makeText(this, app.label + " is a system app and cannot be uninstalled", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Uri pkgUri = Uri.fromParts("package", app.packageName, null);
+        try {
+            Intent intent = new Intent(Intent.ACTION_DELETE, pkgUri);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+            startActivity(intent);
+        } catch (Exception firstErr) {
+            try {
+                Intent fallback = new Intent(Intent.ACTION_UNINSTALL_PACKAGE, pkgUri);
+                fallback.putExtra(Intent.EXTRA_RETURN_RESULT, false);
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                startActivity(fallback);
+            } catch (Exception e) {
+                Toast.makeText(this, "Could not start uninstallation", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private void showFolderOptionsPopup(final View anchor, final FolderInfo folder, final int pageIndex, final int itemIndex) {
@@ -2131,14 +2824,14 @@ public class MainActivity extends Activity {
                 (int) (230 * getResources().getDisplayMetrics().density),
                 ViewGroup.LayoutParams.WRAP_CONTENT, true);
 
-        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popupWindow.setElevation(24f);
+        preparePixelPopupWindow(popupWindow, 24f);
 
         // Dynamic Page Chips
         LinearLayout llChips = popupView.findViewById(R.id.folder_ll_page_chips);
         llChips.removeAllViews();
         int density = (int) getResources().getDisplayMetrics().density;
 
+        final boolean isNight = LauncherTheme.isNightMode(this);
         for (int p = 0; p < pages.size(); p++) {
             final int targetPage = p;
             TextView chip = new TextView(this);
@@ -2147,7 +2840,7 @@ public class MainActivity extends Activity {
             chip.setLayoutParams(lp);
             chip.setGravity(Gravity.CENTER);
             chip.setText(String.valueOf(p + 1));
-            chip.setTextColor(Color.WHITE);
+            chip.setTextColor(pageIndex == targetPage ? Color.WHITE : LauncherTheme.textPrimary(isNight));
             chip.setTextSize(13);
             chip.setBackgroundResource(pageIndex == targetPage ? R.drawable.chip_page_active_bg : R.drawable.chip_page_bg);
             chip.setOnClickListener(new View.OnClickListener() {
@@ -2225,7 +2918,7 @@ public class MainActivity extends Activity {
         }
 
         popupWindow.showAtLocation(rootLayout, Gravity.NO_GRAVITY, x, y);
-        animatePopIn(popupView);
+        animateAnchoredPopupIn(popupView, anchor, x, y, popupW);
     }
 
     private void showFolderPopup(final View anchorView, final FolderInfo folder, final int pageIdx, final int itemIdx) {
@@ -2236,7 +2929,7 @@ public class MainActivity extends Activity {
         etTitle.setText(folder.name);
 
         GridView gv = dialogView.findViewById(R.id.gv_folder_apps);
-        final AppAdapter adapter = new AppAdapter(this, folder.apps);
+        final AppAdapter adapter = new AppAdapter(this, folder.apps, 56, 12.0f);
         gv.setAdapter(adapter);
 
         float density = getResources().getDisplayMetrics().density;
@@ -2255,8 +2948,7 @@ public class MainActivity extends Activity {
                 popupWidth,
                 ViewGroup.LayoutParams.WRAP_CONTENT, true);
 
-        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popupWindow.setElevation(28f * density);
+        preparePixelPopupWindow(popupWindow, 28f * density);
 
         // Position folder directly near the folder icon (Android 17 style)
         int targetX;
@@ -2305,35 +2997,107 @@ public class MainActivity extends Activity {
         dialogView.setScaleY(0.18f);
         dialogView.setAlpha(0f);
 
+        gv.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                lastTouchRawX = event.getRawX();
+                lastTouchRawY = event.getRawY();
+                if (isDragActive) {
+                    handleDragTouchEvent(event);
+                    return true;
+                }
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    touchDownSeq++;
+                    touchDownTimeMs = SystemClock.uptimeMillis();
+                    touchDownRawX = event.getRawX();
+                    touchDownRawY = event.getRawY();
+                    touchMovedBeyondStillSlop = false;
+                    touchMovedBeyondTapSlop = false;
+                    isMultiTouchGesture = false;
+                    isPrimaryPointerDown = true;
+                    cancelPendingLongPressRunnables();
+                } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
+                    isMultiTouchGesture = true;
+                    touchMovedBeyondTapSlop = true;
+                    cancelPendingLongPressRunnables();
+                } else if (action == MotionEvent.ACTION_MOVE) {
+                    float moveDist = (float) Math.hypot(event.getRawX() - touchDownRawX, event.getRawY() - touchDownRawY);
+                    if (moveDist > longPressTouchSlopPx) {
+                        touchMovedBeyondStillSlop = true;
+                        cancelPendingLongPressRunnables();
+                    }
+                    if (moveDist > tapMoveSlopPx) {
+                        touchMovedBeyondTapSlop = true;
+                    }
+                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    if (action == MotionEvent.ACTION_UP
+                            && Math.hypot(event.getRawX() - touchDownRawX, event.getRawY() - touchDownRawY) > tapMoveSlopPx) {
+                        touchMovedBeyondTapSlop = true;
+                    }
+                    if (touchMovedBeyondTapSlop || isMultiTouchGesture) {
+                        lastSwipeEndTimeMs = SystemClock.uptimeMillis();
+                    }
+                    isPrimaryPointerDown = false;
+                    cancelPendingLongPressRunnables();
+                }
+                return false;
+            }
+        });
+
+        popupWindow.setOnDismissListener(new PopupWindow.OnDismissListener() {
+            @Override
+            public void onDismiss() {
+                cancelPendingLongPressRunnables();
+                if (pendingFolderDragPopup == popupWindow) {
+                    clearPendingFolderDragState();
+                }
+            }
+        });
+
         gv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                if (!isGestureTapEligible()) return;
                 AppInfo app = adapter.getItem(position);
                 if (app != null) {
-                    popupWindow.dismiss();
-                    launchApp(app);
+                    View iconView = view != null ? view.findViewById(R.id.iv_app_icon) : null;
+                    pendingFolderLaunchPopup = popupWindow;
+                    dialogView.animate().alpha(0f).setDuration(90L).start();
+                    launchApp(app, iconView != null ? iconView : view);
+                    mainHandler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (pendingFolderLaunchPopup == popupWindow) {
+                                pendingFolderLaunchPopup = null;
+                                try {
+                                    if (popupWindow.isShowing()) {
+                                        popupWindow.dismiss();
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    }, 650L);
                 }
             }
         });
 
         gv.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
-            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                AppInfo app = adapter.getItem(position);
-                if (app != null) {
-                    popupWindow.dismiss();
-                    folder.apps.remove(position);
-                    if (folder.apps.size() == 1) {
-                        pages.get(pageIdx).set(itemIdx, new LauncherItem(folder.apps.get(0)));
-                    } else if (folder.apps.isEmpty()) {
-                        pages.get(pageIdx).set(itemIdx, null);
-                    }
-                    cleanupFoldersOnAllPages();
-                    pruneEmptyTrailingPages();
-                    savePages();
-                    refreshAllPages();
-                    startDragItem(null, new LauncherItem(app), -1, -1);
+            public boolean onItemLongClick(AdapterView<?> parent, final View view, final int position, long id) {
+                if (!canStartGestureDragHold()) {
+                    return false;
                 }
+                final AppInfo app = adapter.getItem(position);
+                if (app == null) return false;
+                scheduleDeferredDragHold(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (popupWindow.isShowing()) {
+                            startDragFromFolderPopup(view, app, folder, pageIdx, itemIdx, position, popupWindow, dialogView);
+                        }
+                    }
+                }, LONG_PRESS_DRAWER_HOLD_MS);
                 return true;
             }
         });
@@ -2356,14 +3120,7 @@ public class MainActivity extends Activity {
         });
 
         popupWindow.showAtLocation(rootLayout, Gravity.NO_GRAVITY, targetX, targetY);
-
-        dialogView.animate()
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setDuration(240)
-                .setInterpolator(new OvershootInterpolator(1.15f))
-                .start();
+        UiMotion.animateFolderPopIn(dialogView, pivotX, pivotY);
     }
 
     private void savePages() {
@@ -2495,6 +3252,7 @@ public class MainActivity extends Activity {
 
         cleanupFoldersOnAllPages();
         migrateToUnifiedGridIfNeeded();
+        migrateCompactAtAGlanceIfNeeded();
         pruneEmptyTrailingPages();
         if (pages.isEmpty()) {
             pages.add(createEmptyPage());
@@ -2538,6 +3296,41 @@ public class MainActivity extends Activity {
                     }
 
                     @Override
+                    public boolean isTouchInScrollbar(float rawX, float rawY) {
+                        return drawerScrollbar != null && drawerScrollbar.isInTouchZone(rawX, rawY);
+                    }
+
+                    @Override
+                    public void onDrawerOpenFractionChanged(float openFraction) {
+                        View activeDrawerCapsule = getActiveDrawerSearchView();
+                        if (activeDrawerCapsule != null) {
+                            float inv = 1f - openFraction;
+                            float density = getResources().getDisplayMetrics().density;
+                            activeDrawerCapsule.setTranslationY(inv * 14f * density);
+                            float barScale = 0.96f + 0.04f * openFraction;
+                            activeDrawerCapsule.setScaleX(barScale);
+                            activeDrawerCapsule.setScaleY(barScale);
+                        }
+                        lastDrawerOpenFraction = openFraction;
+                        float blurDensity = getResources().getDisplayMetrics().density;
+                        UiMotion.setWindowBackgroundBlurRadius(getWindow(), Math.round(30f * blurDensity * openFraction));
+                        boolean suspendForDrawer = openFraction > 0.02f;
+                        if (isEdgeExclusionSuspendedForDrawer != suspendForDrawer) {
+                            isEdgeExclusionSuspendedForDrawer = suspendForDrawer;
+                            updateHomeSystemGestureExclusion();
+                        }
+                        boolean visiblyOpen = openFraction >= 0.45f;
+                        if (isDrawerVisiblyOpenForBars != visiblyOpen) {
+                            isDrawerVisiblyOpenForBars = visiblyOpen;
+                            LauncherTheme.updateSystemBarsForDrawer(
+                                    getWindow(),
+                                    LauncherTheme.isNightMode(MainActivity.this),
+                                    isDrawerVisiblyOpenForBars
+                            );
+                        }
+                    }
+
+                    @Override
                     public void onDrawerDragStarted() {
                         cancelPendingLongPressRunnables();
                         if (hsvHomePages != null) {
@@ -2570,6 +3363,13 @@ public class MainActivity extends Activity {
         );
     }
 
+    private void cancelPendingDragHoldRunnable() {
+        if (pendingDragHoldRunnable != null) {
+            mainHandler.removeCallbacks(pendingDragHoldRunnable);
+            pendingDragHoldRunnable = null;
+        }
+    }
+
     private void cancelPendingLongPressRunnables() {
         if (searchBarLongPressRunnable != null) {
             mainHandler.removeCallbacks(searchBarLongPressRunnable);
@@ -2583,6 +3383,118 @@ public class MainActivity extends Activity {
             mainHandler.removeCallbacks(widgetLongPressRunnable);
             widgetLongPressRunnable = null;
         }
+        cancelPendingDragHoldRunnable();
+    }
+
+    private boolean isGestureTapEligible() {
+        if (isDragActive
+                || (hsvHomePages != null && hsvHomePages.isPaging())
+                || (drawerController != null && drawerController.isDragging())
+                || (drawerScrollbar != null && drawerScrollbar.isDragging())) {
+            return false;
+        }
+        if (touchMovedBeyondTapSlop || isMultiTouchGesture) {
+            if (isPrimaryPointerDown || (SystemClock.uptimeMillis() - lastSwipeEndTimeMs) < 350L) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean canStartGestureDragHold() {
+        return !isDragActive
+                && !isWindowModeActive
+                && isPrimaryPointerDown
+                && !touchMovedBeyondStillSlop
+                && !isMultiTouchGesture
+                && (hsvHomePages == null || !hsvHomePages.isPaging())
+                && (drawerController == null || !drawerController.isDragging())
+                && (drawerScrollbar == null || !drawerScrollbar.isDragging());
+    }
+
+    private void scheduleDeferredDragHold(final Runnable triggerAction, long requiredHoldMs) {
+        if (!canStartGestureDragHold()) return;
+        cancelPendingDragHoldRunnable();
+        final int expectedSeq = touchDownSeq;
+        long elapsed = Math.max(0L, SystemClock.uptimeMillis() - touchDownTimeMs);
+        long remaining = Math.max(0L, requiredHoldMs - elapsed);
+        pendingDragHoldRunnable = new Runnable() {
+            @Override
+            public void run() {
+                pendingDragHoldRunnable = null;
+                if (expectedSeq == touchDownSeq && canStartGestureDragHold()) {
+                    triggerAction.run();
+                }
+            }
+        };
+        mainHandler.postDelayed(pendingDragHoldRunnable, remaining);
+    }
+
+    private void handleDeferredViewLongClick(final Runnable dragStarter, boolean alreadyScheduled, long requiredHoldMs) {
+        boolean drawerOpen = (drawerController != null && drawerController.isVisibleOrAnimating());
+        if (drawerOpen || !canStartGestureDragHold()) return;
+        if (alreadyScheduled) {
+            // Let the dispatchTouchEvent timer complete the full intentional hold duration
+            return;
+        }
+        scheduleDeferredDragHold(dragStarter, requiredHoldMs);
+    }
+
+    private void updateTouchGestureState(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                touchDownSeq++;
+                touchDownTimeMs = SystemClock.uptimeMillis();
+                touchDownRawX = ev.getRawX();
+                touchDownRawY = ev.getRawY();
+                touchMovedBeyondStillSlop = false;
+                touchMovedBeyondTapSlop = false;
+                isMultiTouchGesture = false;
+                isPrimaryPointerDown = true;
+                cancelPendingLongPressRunnables();
+                break;
+
+            case MotionEvent.ACTION_POINTER_DOWN:
+                isMultiTouchGesture = true;
+                touchMovedBeyondTapSlop = true;
+                cancelPendingLongPressRunnables();
+                break;
+
+            case MotionEvent.ACTION_MOVE:
+                float moveDist = (float) Math.hypot(ev.getRawX() - touchDownRawX, ev.getRawY() - touchDownRawY);
+                if (moveDist > longPressTouchSlopPx) {
+                    touchMovedBeyondStillSlop = true;
+                }
+                if (moveDist > tapMoveSlopPx) {
+                    touchMovedBeyondTapSlop = true;
+                }
+                boolean controllerDragging = (hsvHomePages != null && hsvHomePages.isPaging())
+                        || (drawerController != null && drawerController.isDragging())
+                        || (drawerScrollbar != null && drawerScrollbar.isDragging());
+                if (controllerDragging) {
+                    touchMovedBeyondTapSlop = true;
+                }
+                if (controllerDragging || touchMovedBeyondStillSlop) {
+                    cancelPendingLongPressRunnables();
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                if (ev.getActionMasked() == MotionEvent.ACTION_UP
+                        && Math.hypot(ev.getRawX() - touchDownRawX, ev.getRawY() - touchDownRawY) > tapMoveSlopPx) {
+                    touchMovedBeyondTapSlop = true;
+                }
+                if (touchMovedBeyondTapSlop || isMultiTouchGesture
+                        || (hsvHomePages != null && hsvHomePages.isPaging())
+                        || (drawerController != null && drawerController.isDragging())
+                        || (drawerScrollbar != null && drawerScrollbar.isDragging())) {
+                    lastSwipeEndTimeMs = SystemClock.uptimeMillis();
+                }
+                isPrimaryPointerDown = false;
+                cancelPendingLongPressRunnables();
+                break;
+        }
     }
 
     @Override
@@ -2590,117 +3502,127 @@ public class MainActivity extends Activity {
         lastTouchRawX = ev.getRawX();
         lastTouchRawY = ev.getRawY();
 
+        int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            DisplayRefreshHelper.requestInteractiveBoost(this, true);
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            DisplayRefreshHelper.requestInteractiveBoost(this, false);
+        }
+
         if (isDragActive) {
             handleDragTouchEvent(ev);
             return true;
         }
 
+        updateTouchGestureState(ev);
+
         if (drawerController != null && drawerController.onDispatchTouchEvent(ev)) {
             return true;
         }
 
-        switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                touchDownRawX = ev.getRawX();
-                touchDownRawY = ev.getRawY();
-                cancelPendingLongPressRunnables();
+        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            boolean drawerClosed = (drawerController == null || !drawerController.isVisibleOrAnimating());
+            boolean panelClosed = (customizationPanelOverlay == null || customizationPanelOverlay.getVisibility() != View.VISIBLE);
+            if (drawerClosed && panelClosed && !isWindowModeActive) {
+                final int downSeq = touchDownSeq;
+                // 1. Long press detector for Original Google Search Bar (require deliberate stillness + hold)
+                final View topSearchContainer = findViewById(R.id.search_bar_top_container);
+                final View bottomSearchContainer = findViewById(R.id.search_bar_container);
+                final View activeSearchContainer = (topSearchContainer != null && topSearchContainer.getVisibility() == View.VISIBLE)
+                        ? topSearchContainer
+                        : ((bottomSearchContainer != null && bottomSearchContainer.getVisibility() == View.VISIBLE) ? bottomSearchContainer : null);
 
-                boolean drawerClosed = (drawerController == null || !drawerController.isVisibleOrAnimating());
-                boolean panelClosed = (customizationPanelOverlay == null || customizationPanelOverlay.getVisibility() != View.VISIBLE);
-                if (drawerClosed && panelClosed && !isWindowModeActive) {
-                    // 1. Long press detector for Original Google Search Bar (either Top or Bottom container)
-                    final View topSearchContainer = findViewById(R.id.search_bar_top_container);
-                    final View bottomSearchContainer = findViewById(R.id.search_bar_container);
-                    final View activeSearchContainer = (topSearchContainer != null && topSearchContainer.getVisibility() == View.VISIBLE)
-                            ? topSearchContainer
-                            : ((bottomSearchContainer != null && bottomSearchContainer.getVisibility() == View.VISIBLE) ? bottomSearchContainer : null);
-
-                    if (activeSearchContainer != null && isTouchInsideView(activeSearchContainer, ev.getRawX(), ev.getRawY())) {
-                        searchBarLongPressRunnable = new Runnable() {
-                            @Override
-                            public void run() {
-                                if (!isDragActive && (hsvHomePages == null || !hsvHomePages.isPaging()) && activeSearchContainer.getVisibility() == View.VISIBLE) {
-                                    startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", activeSearchContainer);
-                                }
+                if (activeSearchContainer != null && isTouchInsideView(activeSearchContainer, ev.getRawX(), ev.getRawY(), 0f)) {
+                    searchBarLongPressRunnable = new Runnable() {
+                        @Override
+                        public void run() {
+                            searchBarLongPressRunnable = null;
+                            if (downSeq == touchDownSeq && canStartGestureDragHold()
+                                    && (drawerController == null || !drawerController.isVisibleOrAnimating())
+                                    && activeSearchContainer.getVisibility() == View.VISIBLE) {
+                                startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", activeSearchContainer);
                             }
-                        };
-                        mainHandler.postDelayed(searchBarLongPressRunnable, 300);
-                    }
+                        }
+                    };
+                    mainHandler.postDelayed(searchBarLongPressRunnable, LONG_PRESS_SPECIAL_HOLD_MS);
+                }
 
-                    // 2. Long press detector for Calendar on current page
-                    final View currGlanceView = pageGlanceViews.get(currentPage);
-                    if (currGlanceView != null && currGlanceView.getVisibility() == View.VISIBLE && isTouchInsideView(currGlanceView, ev.getRawX(), ev.getRawY())) {
-                        atAGlanceLongPressRunnable = new Runnable() {
-                            @Override
-                            public void run() {
-                                if (!isDragActive && (hsvHomePages == null || !hsvHomePages.isPaging()) && currGlanceView.isAttachedToWindow()) {
-                                    startDragSpecialItem(SPECIAL_ITEM_CALENDAR, "At a Glance (Calendar)", currGlanceView);
-                                }
+                // 2. Long press detector for Calendar on current page
+                final View currGlanceView = pageGlanceViews.get(currentPage);
+                if (currGlanceView != null && currGlanceView.getVisibility() == View.VISIBLE
+                        && isTouchInsideView(currGlanceView, ev.getRawX(), ev.getRawY(), 0f)) {
+                    atAGlanceLongPressRunnable = new Runnable() {
+                        @Override
+                        public void run() {
+                            atAGlanceLongPressRunnable = null;
+                            if (downSeq == touchDownSeq && canStartGestureDragHold()
+                                    && (drawerController == null || !drawerController.isVisibleOrAnimating())
+                                    && currGlanceView.isAttachedToWindow()) {
+                                startDragSpecialItem(SPECIAL_ITEM_CALENDAR, "At a Glance (Calendar)", currGlanceView);
                             }
-                        };
-                        mainHandler.postDelayed(atAGlanceLongPressRunnable, 280);
-                    }
+                        }
+                    };
+                    mainHandler.postDelayed(atAGlanceLongPressRunnable, LONG_PRESS_SPECIAL_HOLD_MS);
+                }
 
-                    // 3. Long press detector for placed AppWidgets on current page (works even over clickable widget faces like Clock)
-                    List<View> currWidgets = pageWidgetWrappers.get(currentPage);
-                    if (currWidgets != null) {
-                        for (final View wWrapper : currWidgets) {
-                            if (wWrapper != null && wWrapper.getVisibility() == View.VISIBLE && isTouchInsideView(wWrapper, ev.getRawX(), ev.getRawY())) {
-                                Object tagObj = wWrapper.getTag();
-                                if (tagObj instanceof WidgetDragTag) {
-                                    final WidgetDragTag dTag = (WidgetDragTag) tagObj;
-                                    widgetLongPressRunnable = new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            if (!isDragActive && (hsvHomePages == null || !hsvHomePages.isPaging()) && wWrapper.isAttachedToWindow()) {
-                                                startDragWidget(dTag.pw.page, dTag.pw.id, dTag.label, dTag.pw.spanCols, dTag.pw.spanRows, wWrapper);
-                                            }
+                // 3. Long press detector for placed AppWidgets on current page
+                List<View> currWidgets = pageWidgetWrappers.get(currentPage);
+                if (currWidgets != null) {
+                    for (final View wWrapper : currWidgets) {
+                        if (wWrapper != null && wWrapper.getVisibility() == View.VISIBLE
+                                && isTouchInsideView(wWrapper, ev.getRawX(), ev.getRawY(), 0f)) {
+                            Object tagObj = wWrapper.getTag();
+                            if (tagObj instanceof WidgetDragTag) {
+                                final WidgetDragTag dTag = (WidgetDragTag) tagObj;
+                                widgetLongPressRunnable = new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        widgetLongPressRunnable = null;
+                                        if (downSeq == touchDownSeq && canStartGestureDragHold()
+                                                && (drawerController == null || !drawerController.isVisibleOrAnimating())
+                                                && wWrapper.isAttachedToWindow()) {
+                                            startDragWidget(dTag.pw.page, dTag.pw.id, dTag.label, dTag.pw.spanCols, dTag.pw.spanRows, wWrapper);
                                         }
-                                    };
-                                    mainHandler.postDelayed(widgetLongPressRunnable, 380);
-                                }
-                                break;
+                                    }
+                                };
+                                mainHandler.postDelayed(widgetLongPressRunnable, LONG_PRESS_WIDGET_HOLD_MS);
                             }
+                            break;
                         }
                     }
                 }
-                break;
-
-            case MotionEvent.ACTION_MOVE:
-                float moveDist = (float) Math.hypot(ev.getRawX() - touchDownRawX, ev.getRawY() - touchDownRawY);
-                if ((hsvHomePages != null && hsvHomePages.isPaging())
-                        || (drawerController != null && drawerController.isDragging())
-                        || moveDist > 14 * getResources().getDisplayMetrics().density) {
-                    cancelPendingLongPressRunnables();
-                }
-                break;
-
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                cancelPendingLongPressRunnables();
-                break;
+            }
         }
 
         return super.dispatchTouchEvent(ev);
     }
 
     private void setupAtAGlance() {
-        SimpleDateFormat sdf = new SimpleDateFormat("EEEE, MMM d", Locale.getDefault());
+        SimpleDateFormat sdf = new SimpleDateFormat("EEE, d MMM", Locale.getDefault());
         String currentDate = sdf.format(new Date());
-        tvDate.setText(currentDate);
+        if (tvDate != null) {
+            tvDate.setText(currentDate);
+        }
+        refreshGlanceDateText();
 
         View atAGlance = findViewById(R.id.at_a_glance);
         if (atAGlance != null) {
             atAGlance.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
                     openCalendar();
                 }
             });
             atAGlance.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
-                public boolean onLongClick(View v) {
-                    startDragSpecialItem(SPECIAL_ITEM_CALENDAR, "At a Glance (Calendar)", v);
+                public boolean onLongClick(final View v) {
+                    handleDeferredViewLongClick(new Runnable() {
+                        @Override
+                        public void run() {
+                            startDragSpecialItem(SPECIAL_ITEM_CALENDAR, "At a Glance (Calendar)", v);
+                        }
+                    }, atAGlanceLongPressRunnable != null, LONG_PRESS_SPECIAL_HOLD_MS);
                     return true;
                 }
             });
@@ -2761,10 +3683,22 @@ public class MainActivity extends Activity {
             }
         };
 
-        if (cardWallpaperCurrent != null) cardWallpaperCurrent.setOnClickListener(wpClickListener);
-        if (cardWallpaperTheme1 != null) cardWallpaperTheme1.setOnClickListener(wpClickListener);
-        if (cardWallpaperTheme2 != null) cardWallpaperTheme2.setOnClickListener(wpClickListener);
-        if (cardWallpaperTheme3 != null) cardWallpaperTheme3.setOnClickListener(wpClickListener);
+        if (cardWallpaperCurrent != null) {
+            cardWallpaperCurrent.setClipToOutline(true);
+            cardWallpaperCurrent.setOnClickListener(wpClickListener);
+        }
+        if (cardWallpaperTheme1 != null) {
+            cardWallpaperTheme1.setClipToOutline(true);
+            cardWallpaperTheme1.setOnClickListener(wpClickListener);
+        }
+        if (cardWallpaperTheme2 != null) {
+            cardWallpaperTheme2.setClipToOutline(true);
+            cardWallpaperTheme2.setOnClickListener(wpClickListener);
+        }
+        if (cardWallpaperTheme3 != null) {
+            cardWallpaperTheme3.setClipToOutline(true);
+            cardWallpaperTheme3.setOnClickListener(wpClickListener);
+        }
         if (rowActionWallpaper != null) rowActionWallpaper.setOnClickListener(wpClickListener);
 
         if (rowActionWidgets != null) {
@@ -2802,49 +3736,130 @@ public class MainActivity extends Activity {
         if (isDragActive || isWindowModeActive || customizationPanelOverlay == null) return;
         if (appDrawer != null && appDrawer.getVisibility() == View.VISIBLE) return;
 
+        boolean loadedWp = false;
         try {
             WallpaperManager wm = WallpaperManager.getInstance(this);
             Drawable wp = wm.getDrawable();
             if (wp != null && ivWallpaperThumbCurrent != null) {
                 ivWallpaperThumbCurrent.setImageDrawable(wp);
+                loadedWp = true;
             }
-        } catch (Exception ignored) {}
-
-        float density = getResources().getDisplayMetrics().density;
-        customizationPanelOverlay.setVisibility(View.VISIBLE);
-        customizationPanelOverlay.setAlpha(0f);
-        customizationPanelOverlay.animate().alpha(1f).setDuration(180).start();
-
-        if (panelCustomizationCard != null) {
-            panelCustomizationCard.setTranslationY(80f * density);
-            panelCustomizationCard.animate()
-                    .translationY(0f)
-                    .setDuration(240)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
+        } catch (Throwable ignored) {}
+        if (!loadedWp && ivWallpaperThumbCurrent != null) {
+            ivWallpaperThumbCurrent.setImageResource(R.drawable.wallpaper_card_2_bg);
         }
+
+        final float startOffsetY = 80f * getResources().getDisplayMetrics().density;
+        Object oldAnim = customizationPanelOverlay.getTag();
+        if (oldAnim instanceof ValueAnimator) {
+            ((ValueAnimator) oldAnim).cancel();
+        }
+        DisplayRefreshHelper.requestInteractiveBoost(this, true);
+        customizationPanelOverlay.setVisibility(View.VISIBLE);
+        updateHomeSystemGestureExclusion();
+        customizationPanelOverlay.setAlpha(0f);
+        if (panelCustomizationCard != null) {
+            panelCustomizationCard.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            panelCustomizationCard.setTranslationY(startOffsetY);
+            DisplayRefreshHelper.setFrameContentVelocity(panelCustomizationCard, 2800f);
+        }
+
+        final DisplayRefreshHelper.FramePacer pacer = new DisplayRefreshHelper.FramePacer();
+        ValueAnimator va = ValueAnimator.ofFloat(0f, 1f);
+        va.setDuration(DisplayRefreshHelper.scaleDurationMs(220L));
+        va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                if (!pacer.shouldRender(animation)) return;
+                float raw = (float) animation.getAnimatedValue();
+                float ease = UiMotion.EMPHASIZED_DECEL.getInterpolation(raw);
+                if (customizationPanelOverlay != null) {
+                    customizationPanelOverlay.setAlpha(Math.min(1f, raw * 1.4f));
+                }
+                if (panelCustomizationCard != null) {
+                    panelCustomizationCard.setTranslationY(startOffsetY * (1f - ease));
+                }
+            }
+        });
+        va.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (customizationPanelOverlay != null) {
+                    customizationPanelOverlay.setTag(null);
+                    customizationPanelOverlay.setAlpha(1f);
+                }
+                if (panelCustomizationCard != null) {
+                    panelCustomizationCard.setLayerType(View.LAYER_TYPE_NONE, null);
+                    panelCustomizationCard.setTranslationY(0f);
+                }
+                DisplayRefreshHelper.requestInteractiveBoost(MainActivity.this, false);
+            }
+        });
+        customizationPanelOverlay.setTag(va);
+        va.start();
     }
 
     private void hideCustomizationPanel() {
         if (customizationPanelOverlay == null || customizationPanelOverlay.getVisibility() != View.VISIBLE) return;
 
-        float density = getResources().getDisplayMetrics().density;
-        if (panelCustomizationCard != null) {
-            panelCustomizationCard.animate()
-                    .translationY(80f * density)
-                    .setDuration(180)
-                    .start();
+        Object oldAnim = customizationPanelOverlay.getTag();
+        if (oldAnim instanceof ValueAnimator) {
+            ((ValueAnimator) oldAnim).cancel();
         }
-        customizationPanelOverlay.animate()
-                .alpha(0f)
-                .setDuration(180)
-                .withEndAction(new Runnable() {
-                    @Override
-                    public void run() {
-                        customizationPanelOverlay.setVisibility(View.GONE);
+        DisplayRefreshHelper.requestInteractiveBoost(this, true);
+        final float targetOffsetY = 80f * getResources().getDisplayMetrics().density;
+        final float startAlpha = customizationPanelOverlay.getAlpha();
+        final float startY = panelCustomizationCard != null ? panelCustomizationCard.getTranslationY() : 0f;
+        if (panelCustomizationCard != null) {
+            panelCustomizationCard.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            DisplayRefreshHelper.setFrameContentVelocity(panelCustomizationCard, 2800f);
+        }
+        final DisplayRefreshHelper.FramePacer pacer = new DisplayRefreshHelper.FramePacer();
+        ValueAnimator va = ValueAnimator.ofFloat(0f, 1f);
+        va.setDuration(DisplayRefreshHelper.scaleDurationMs(180L));
+        va.setInterpolator(new AccelerateInterpolator(1.4f));
+        va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                if (!pacer.shouldRender(animation)) return;
+                float t = (float) animation.getAnimatedValue();
+                if (customizationPanelOverlay != null) {
+                    customizationPanelOverlay.setAlpha(startAlpha * (1f - t));
+                }
+                if (panelCustomizationCard != null) {
+                    panelCustomizationCard.setTranslationY(startY + (targetOffsetY - startY) * t);
+                }
+            }
+        });
+        va.addListener(new android.animation.AnimatorListenerAdapter() {
+            private boolean canceled = false;
+
+            @Override
+            public void onAnimationCancel(android.animation.Animator animation) {
+                canceled = true;
+            }
+
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (panelCustomizationCard != null) {
+                    panelCustomizationCard.setLayerType(View.LAYER_TYPE_NONE, null);
+                    if (!canceled) {
+                        panelCustomizationCard.setTranslationY(0f);
                     }
-                })
-                .start();
+                }
+                if (customizationPanelOverlay != null) {
+                    customizationPanelOverlay.setTag(null);
+                    if (!canceled) {
+                        customizationPanelOverlay.setVisibility(View.GONE);
+                        customizationPanelOverlay.setAlpha(1f);
+                        updateHomeSystemGestureExclusion();
+                    }
+                }
+                DisplayRefreshHelper.requestInteractiveBoost(MainActivity.this, false);
+            }
+        });
+        customizationPanelOverlay.setTag(va);
+        va.start();
     }
 
     private void openWallpaperAndStyle() {
@@ -2932,14 +3947,20 @@ public class MainActivity extends Activity {
     }
 
     private void showModernHomeSettings() {
+        View sheetView = LayoutInflater.from(this).inflate(R.layout.dialog_home_settings, null);
         final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setView(R.layout.dialog_home_settings)
+                .setView(sheetView)
                 .create();
 
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setGravity(Gravity.BOTTOM);
+            dialog.getWindow().setWindowAnimations(0);
         }
+        DisplayRefreshHelper.requestInteractiveBoost(this, true);
         dialog.show();
+        DisplayRefreshHelper.applyWindowRefreshPreference(dialog.getWindow(), MainActivity.this, true);
+        UiMotion.animateSheetSlideIn(sheetView);
 
         View btnClose = dialog.findViewById(R.id.btn_close_settings);
         if (btnClose != null) {
@@ -2959,9 +3980,11 @@ public class MainActivity extends Activity {
         if (tvStatus != null) {
             tvStatus.setText(isDef ? "Active as Default Launcher" : "Not default launcher");
         }
+        final boolean isNight = LauncherTheme.isNightMode(this);
         if (btnDefault != null) {
             btnDefault.setText(isDef ? "Active" : "Set Default");
             btnDefault.setBackgroundResource(isDef ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
+            btnDefault.setTextColor(isDef ? Color.WHITE : LauncherTheme.textPrimary(isNight));
         }
         View.OnClickListener defaultClick = new View.OnClickListener() {
             @Override
@@ -2995,6 +4018,17 @@ public class MainActivity extends Activity {
             });
         }
 
+        Switch swDrawerGoogleWidget = dialog.findViewById(R.id.sw_toggle_drawer_google_widget);
+        if (swDrawerGoogleWidget != null) {
+            swDrawerGoogleWidget.setChecked(isDrawerGoogleWidgetEnabled());
+            swDrawerGoogleWidget.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    setDrawerGoogleWidgetEnabled(isChecked);
+                }
+            });
+        }
+
         // Grid Mode Pills
         final TextView btn4x5 = dialog.findViewById(R.id.btn_grid_mode_4x5);
         final TextView btn5x5 = dialog.findViewById(R.id.btn_grid_mode_5x5);
@@ -3003,9 +4037,22 @@ public class MainActivity extends Activity {
         final Runnable updateGridPills = new Runnable() {
             @Override
             public void run() {
-                if (btn4x5 != null) btn4x5.setBackgroundResource(currentGridMode == GRID_MODE_4X5 ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
-                if (btn5x5 != null) btn5x5.setBackgroundResource(currentGridMode == GRID_MODE_5X5 ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
-                if (btn16x9 != null) btn16x9.setBackgroundResource(currentGridMode == GRID_MODE_16X9 ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
+                int inactiveText = LauncherTheme.textPrimary(isNight);
+                if (btn4x5 != null) {
+                    boolean active = currentGridMode == GRID_MODE_4X5;
+                    btn4x5.setBackgroundResource(active ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
+                    btn4x5.setTextColor(active ? Color.WHITE : inactiveText);
+                }
+                if (btn5x5 != null) {
+                    boolean active = currentGridMode == GRID_MODE_5X5;
+                    btn5x5.setBackgroundResource(active ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
+                    btn5x5.setTextColor(active ? Color.WHITE : inactiveText);
+                }
+                if (btn16x9 != null) {
+                    boolean active = currentGridMode == GRID_MODE_16X9;
+                    btn16x9.setBackgroundResource(active ? R.drawable.pill_active_bg : R.drawable.pill_inactive_bg);
+                    btn16x9.setTextColor(active ? Color.WHITE : inactiveText);
+                }
             }
         };
         updateGridPills.run();
@@ -3038,6 +4085,19 @@ public class MainActivity extends Activity {
             });
         }
 
+        // Animation frame rate auto-adapts to maximum display refresh rate (switcher hidden cleanly)
+        View cardRefreshRate = dialog.findViewById(R.id.card_refresh_rate);
+        if (cardRefreshRate != null) {
+            cardRefreshRate.setVisibility(View.GONE);
+        }
+        DisplayRefreshHelper.applyWindowRefreshPreference(dialog.getWindow(), MainActivity.this, true);
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface di) {
+                DisplayRefreshHelper.applyWindowRefreshPreference(MainActivity.this, false);
+            }
+        });
+
         // System Settings
         View cardSystem = dialog.findViewById(R.id.card_system_settings);
         if (cardSystem != null) {
@@ -3059,14 +4119,20 @@ public class MainActivity extends Activity {
 
     private void showGroupedWidgetPicker() {
         if (appWidgetManager == null) return;
+        View sheetView = LayoutInflater.from(this).inflate(R.layout.dialog_widget_picker, null);
         final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setView(R.layout.dialog_widget_picker)
+                .setView(sheetView)
                 .create();
 
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setGravity(Gravity.BOTTOM);
+            dialog.getWindow().setWindowAnimations(0);
         }
+        DisplayRefreshHelper.requestInteractiveBoost(this, true);
         dialog.show();
+        DisplayRefreshHelper.applyWindowRefreshPreference(dialog.getWindow(), MainActivity.this, true);
+        UiMotion.animateSheetSlideIn(sheetView);
 
         View btnClose = dialog.findViewById(R.id.btn_close_widget_picker);
         if (btnClose != null) {
@@ -3096,12 +4162,8 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     dialog.dismiss();
-                    int gSpanC = getGlanceSpanCols();
-                    int gSpanR = getGlanceSpanRows();
-                    int[] free = findFirstFreeSpotAvoidingAll(currentPage, gSpanC, gSpanR, -1, true);
-                    pushAppsOutOfOverlayRect(currentPage, free[0], free[1], gSpanC, gSpanR);
-                    setAtAGlancePlacement(currentPage, free[0], free[1]);
-                    Toast.makeText(MainActivity.this, "Added Calendar to Page " + (currentPage + 1), Toast.LENGTH_SHORT).show();
+                    setAtAGlancePlacement(currentPage, 0, 0);
+                    Toast.makeText(MainActivity.this, "Added At a Glance to Page " + (currentPage + 1), Toast.LENGTH_SHORT).show();
                 }
             });
         }
@@ -3319,25 +4381,22 @@ public class MainActivity extends Activity {
             if (fallbackPill != null) {
                 fallbackPill.setVisibility(View.GONE);
             }
+            target.setClipChildren(false);
+            target.setClipToPadding(false);
             if (searchWidgetHostView.getParent() instanceof ViewGroup && searchWidgetHostView.getParent() != target) {
                 ((ViewGroup) searchWidgetHostView.getParent()).removeView(searchWidgetHostView);
             }
             if (searchWidgetHostView.getParent() == null) {
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER_VERTICAL
                 );
                 searchWidgetHostView.setLayoutParams(lp);
                 target.addView(searchWidgetHostView);
             }
-            float density = getResources().getDisplayMetrics().density;
-            int wDp = (int) ((getScreenWidth() - 32 * density) / density);
-            Bundle opts = new Bundle();
-            opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, wDp);
-            opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, wDp);
-            opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 52);
-            opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 58);
-            searchWidgetHostView.updateAppWidgetSize(opts, wDp, 54, wDp, 58);
+            searchWidgetHostView.setClipToPadding(false);
+            updateGoogleWidgetSizing(searchWidgetHostView, topPos ? 32f : 40f, 56, 64);
         } else if (topPos && bottomContainer != null && topContainer != null) {
             View fallbackPill = findViewById(R.id.pixel_search_bar);
             if (fallbackPill != null && fallbackPill.getParent() != topContainer) {
@@ -3363,8 +4422,29 @@ public class MainActivity extends Activity {
     private void setAtAGlanceVisible(boolean visible) {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_KEY_SHOW_AT_A_GLANCE, visible).apply();
         updateAtAGlanceVisibility();
-        renderAllSavedWidgets();
+        final int savedPage = Math.max(0, Math.min(pages.size() - 1, currentPage));
+        setupPagesLayout();
         refreshAllPages();
+        restorePageAfterRebuild(savedPage);
+    }
+
+    private void restorePageAfterRebuild(final int targetPage) {
+        if (pages.isEmpty()) return;
+        final int clamped = Math.max(0, Math.min(pages.size() - 1, targetPage));
+        currentPage = clamped;
+        updatePageDots(clamped);
+        if (hsvHomePages != null) {
+            hsvHomePages.post(new Runnable() {
+                @Override
+                public void run() {
+                    int w = getScreenWidth();
+                    if (hsvHomePages != null && w > 0) {
+                        hsvHomePages.scrollTo(clamped * w, 0);
+                    }
+                    updatePageDots(clamped);
+                }
+            });
+        }
     }
 
     private int getAtAGlancePage() {
@@ -3401,8 +4481,9 @@ public class MainActivity extends Activity {
         updateAtAGlanceVisibility();
         pruneEmptyTrailingPages();
         savePages();
-        renderAllSavedWidgets();
+        setupPagesLayout();
         refreshAllPages();
+        restorePageAfterRebuild(page);
     }
 
     private void updateAtAGlanceVisibility() {
@@ -3429,7 +4510,7 @@ public class MainActivity extends Activity {
                 .remove("pref_search_bar_pos")
                 .apply();
 
-        // 2. Migrate Calendar onto page grid Row 0, shifting existing Row 0 apps down cleanly if room exists
+        // 2. Ensure Calendar (At a Glance) header page index is valid; header sits cleanly above GridView
         int oldGlancePage = prefs.getInt(PREF_KEY_AT_A_GLANCE_PAGE, -1);
         int gPage = (oldGlancePage >= 0 && oldGlancePage < pages.size()) ? oldGlancePage : 0;
         prefs.edit()
@@ -3439,85 +4520,190 @@ public class MainActivity extends Activity {
                 .remove("pref_at_a_glance_pos")
                 .apply();
 
-        if (isAtAGlanceVisible() && gPage < pages.size()) {
-            List<LauncherItem> pageList = pages.get(gPage);
-            int cols = getGridColumns();
-            int totalSlots = pageList.size();
-            boolean row0HasApp = false;
-            for (int c = 0; c < Math.min(cols, totalSlots); c++) {
-                if (pageList.get(c) != null) {
-                    row0HasApp = true;
-                    break;
-                }
-            }
-            if (row0HasApp) {
-                boolean lastRowClear = true;
-                for (int s = Math.max(0, totalSlots - cols); s < totalSlots; s++) {
-                    if (pageList.get(s) != null) {
-                        lastRowClear = false;
-                        break;
-                    }
-                }
-                if (lastRowClear && totalSlots > cols) {
-                    for (int s = totalSlots - 1; s >= cols; s--) {
-                        pageList.set(s, pageList.get(s - cols));
-                    }
-                    for (int c = 0; c < cols; c++) {
-                        pageList.set(c, null);
-                    }
-                } else {
-                    pushAppsOutOfOverlayRect(gPage, 0, 0, getGlanceSpanCols(), getGlanceSpanRows());
-                }
-            }
-        }
-
         prefs.edit().putBoolean(PREF_KEY_V206_MIGRATED, true).apply();
         savePages();
         updateSearchBarVisibility();
         updateAtAGlanceVisibility();
     }
 
+    private void migrateCompactAtAGlanceIfNeeded() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (prefs.getBoolean(PREF_KEY_V303_COMPACT_GLANCE_MIGRATED, false)) {
+            return;
+        }
+        int gPage = getAtAGlancePage();
+        if (isAtAGlanceVisible() && getAtAGlanceRow() == 0 && gPage >= 0 && gPage < pages.size()) {
+            List<LauncherItem> pageList = pages.get(gPage);
+            int cols = getGridColumns();
+            int totalSlots = pageList.size();
+            boolean row0Empty = true;
+            for (int c = 0; c < Math.min(cols, totalSlots); c++) {
+                if (pageList.get(c) != null) {
+                    row0Empty = false;
+                    break;
+                }
+            }
+            List<PlacedWidget> widgets = getPlacedWidgetsForPage(gPage);
+            boolean row0HasWidget = false;
+            boolean hasLowerWidget = false;
+            for (PlacedWidget w : widgets) {
+                if (w.row == 0) {
+                    row0HasWidget = true;
+                } else {
+                    hasLowerWidget = true;
+                }
+            }
+            boolean hasLowerApps = false;
+            for (int s = cols; s < totalSlots; s++) {
+                if (pageList.get(s) != null) {
+                    hasLowerApps = true;
+                    break;
+                }
+            }
+            if (row0Empty && !row0HasWidget && (hasLowerApps || hasLowerWidget) && totalSlots > cols) {
+                for (int s = 0; s < totalSlots - cols; s++) {
+                    pageList.set(s, pageList.get(s + cols));
+                }
+                for (int s = Math.max(0, totalSlots - cols); s < totalSlots; s++) {
+                    pageList.set(s, null);
+                }
+                for (PlacedWidget w : widgets) {
+                    if (w.row > 0) {
+                        updateWidgetPlacement(w.id, gPage, w.col, w.row - 1, w.spanCols, w.spanRows);
+                    }
+                }
+                savePages();
+            }
+        }
+        prefs.edit().putBoolean(PREF_KEY_V303_COMPACT_GLANCE_MIGRATED, true).apply();
+    }
+
+    private void refreshGlanceDateText() {
+        SimpleDateFormat sdf = new SimpleDateFormat("EEE, d MMM", Locale.getDefault());
+        String formatted = sdf.format(new Date());
+        int wIcon = (liveWeatherController != null)
+                ? liveWeatherController.getIconResId()
+                : R.drawable.ic_glance_partly_cloudy_day;
+        String wText = (liveWeatherController != null)
+                ? liveWeatherController.getFormattedTemp()
+                : "Weather";
+
+        for (View v : pageGlanceViews.values()) {
+            if (v == null) continue;
+            View tv = v.findViewWithTag("glance_date_text");
+            if (tv instanceof TextView) {
+                ((TextView) tv).setText(formatted);
+            }
+            View ivW = v.findViewWithTag("glance_weather_icon");
+            if (ivW instanceof ImageView) {
+                ((ImageView) ivW).setImageResource(wIcon);
+            }
+            View tvW = v.findViewWithTag("glance_weather_text");
+            if (tvW instanceof TextView) {
+                ((TextView) tvW).setText(wText);
+            }
+        }
+    }
+
     private LinearLayout createPageGlanceView() {
         float density = getResources().getDisplayMetrics().density;
-        LinearLayout wrapper = new LinearLayout(this);
+        boolean dense = (currentGridMode == GRID_MODE_16X9);
+        final LinearLayout wrapper = new LinearLayout(this);
         wrapper.setOrientation(LinearLayout.VERTICAL);
-        wrapper.setGravity(Gravity.CENTER_VERTICAL);
-        int padH = (int) (14 * density);
-        int padV = (int) (6 * density);
-        wrapper.setPadding(padH, padV, padH, padV);
+        wrapper.setGravity(Gravity.TOP | Gravity.START);
+        int padStart = Math.round(18 * density);
+        int padEnd = Math.round(16 * density);
+        int padTop = Math.round((dense ? 6 : 13) * density);
+        int padBottom = Math.round((dense ? 5 : 10) * density);
+        wrapper.setPadding(padStart, padTop, padEnd, padBottom);
+
+        View.OnLongClickListener glanceLongClickListener = new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                handleDeferredViewLongClick(new Runnable() {
+                    @Override
+                    public void run() {
+                        startDragSpecialItem(SPECIAL_ITEM_CALENDAR, "At a Glance", wrapper);
+                    }
+                }, atAGlanceLongPressRunnable != null, LONG_PRESS_SPECIAL_HOLD_MS);
+                return true;
+            }
+        };
 
         TextView tvD = new TextView(this);
-        SimpleDateFormat sdf = new SimpleDateFormat("EEEE, MMM d", Locale.getDefault());
+        tvD.setTag("glance_date_text");
+        SimpleDateFormat sdf = new SimpleDateFormat("EEE, d MMM", Locale.getDefault());
         tvD.setText(sdf.format(new Date()));
-        tvD.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentGridMode == GRID_MODE_16X9 ? 18 : 22);
+        tvD.setTextSize(TypedValue.COMPLEX_UNIT_SP, dense ? 16 : 19);
         tvD.setTextColor(Color.WHITE);
+        tvD.setIncludeFontPadding(false);
+        tvD.setLetterSpacing(-0.01f);
         tvD.setMaxLines(1);
         tvD.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        tvD.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        tvD.setShadowLayer(4f, 1f, 2f, Color.parseColor("#99000000"));
-        wrapper.addView(tvD);
-
-        TextView tvSub = new TextView(this);
-        tvSub.setText("Tap for Calendar");
-        tvSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentGridMode == GRID_MODE_16X9 ? 11 : 13);
-        tvSub.setTextColor(Color.parseColor("#D9FFFFFF"));
-        tvSub.setMaxLines(1);
-        tvSub.setShadowLayer(3f, 1f, 1f, Color.parseColor("#99000000"));
-        wrapper.addView(tvSub);
-
-        wrapper.setOnClickListener(new View.OnClickListener() {
+        tvD.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        tvD.setShadowLayer(3f, 0f, 1.5f, Color.parseColor("#88000000"));
+        tvD.setPadding(0, 0, Math.round(14 * density), Math.round(2 * density));
+        tvD.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        tvD.setClickable(true);
+        tvD.setFocusable(true);
+        tvD.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (!isGestureTapEligible()) return;
                 openCalendar();
             }
         });
-        wrapper.setOnLongClickListener(new View.OnLongClickListener() {
+        tvD.setOnLongClickListener(glanceLongClickListener);
+        wrapper.addView(tvD);
+
+        LinearLayout weatherRow = new LinearLayout(this);
+        weatherRow.setOrientation(LinearLayout.HORIZONTAL);
+        weatherRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lpWeatherRow = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lpWeatherRow.topMargin = Math.round((dense ? 2 : 3) * density);
+        weatherRow.setLayoutParams(lpWeatherRow);
+        weatherRow.setPadding(0, Math.round(2 * density), Math.round(16 * density), Math.round(2 * density));
+        weatherRow.setClickable(true);
+        weatherRow.setFocusable(true);
+
+        ImageView ivWeather = new ImageView(this);
+        ivWeather.setTag("glance_weather_icon");
+        int iconSize = Math.round((dense ? 14 : 18) * density);
+        LinearLayout.LayoutParams lpIcon = new LinearLayout.LayoutParams(iconSize, iconSize);
+        lpIcon.setMarginEnd(Math.round((dense ? 5 : 6) * density));
+        ivWeather.setLayoutParams(lpIcon);
+        ivWeather.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        ivWeather.setImageResource(liveWeatherController != null
+                ? liveWeatherController.getIconResId()
+                : R.drawable.ic_glance_partly_cloudy_day);
+        weatherRow.addView(ivWeather);
+
+        TextView tvWeather = new TextView(this);
+        tvWeather.setTag("glance_weather_text");
+        tvWeather.setText(liveWeatherController != null
+                ? liveWeatherController.getFormattedTemp()
+                : "Weather");
+        tvWeather.setTextSize(TypedValue.COMPLEX_UNIT_SP, dense ? 11.5f : 14f);
+        tvWeather.setTextColor(Color.parseColor("#F2FFFFFF"));
+        tvWeather.setIncludeFontPadding(false);
+        tvWeather.setMaxLines(1);
+        tvWeather.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tvWeather.setShadowLayer(2.5f, 0f, 1f, Color.parseColor("#88000000"));
+        weatherRow.addView(tvWeather);
+
+        weatherRow.setOnClickListener(new View.OnClickListener() {
             @Override
-            public boolean onLongClick(View v) {
-                startDragSpecialItem(SPECIAL_ITEM_CALENDAR, "At a Glance (Calendar)", v);
-                return true;
+            public void onClick(View v) {
+                if (!isGestureTapEligible()) return;
+                launchWeather();
             }
         });
+        weatherRow.setOnLongClickListener(glanceLongClickListener);
+        wrapper.addView(weatherRow);
+
+        wrapper.setOnLongClickListener(glanceLongClickListener);
 
         return wrapper;
     }
@@ -3528,7 +4714,7 @@ public class MainActivity extends Activity {
         loadPages();
         setupPagesLayout();
         refreshAllPages();
-        String name = (mode == GRID_MODE_4X5) ? "4 x 5 (Large 58dp)" : ((mode == GRID_MODE_5X5) ? "5 x 5 (Medium 50dp)" : "16 x 9 (Dense 34dp)");
+        String name = (mode == GRID_MODE_4X5) ? "4 x 5 (Standard 60dp)" : ((mode == GRID_MODE_5X5) ? "5 x 5 (Medium 54dp)" : "16 x 9 (Dense 36dp)");
         Toast.makeText(this, "Grid set to " + name, Toast.LENGTH_SHORT).show();
     }
 
@@ -3664,17 +4850,6 @@ public class MainActivity extends Activity {
     }
 
     private boolean isCellOccupiedByOverlay(int pageIdx, int col, int row, int ignoreWidgetId, boolean ignoreGlance) {
-        if (!ignoreGlance && isAtAGlanceVisible() && getAtAGlancePage() == pageIdx) {
-            int gCols = getGridColumns();
-            int gRows = getGridRows();
-            int spanC = getGlanceSpanCols();
-            int spanR = getGlanceSpanRows();
-            int gCol = Math.max(0, Math.min(gCols - spanC, getAtAGlanceCol()));
-            int gRow = Math.max(0, Math.min(gRows - spanR, getAtAGlanceRow()));
-            if (col >= gCol && col < gCol + spanC && row >= gRow && row < gRow + spanR) {
-                return true;
-            }
-        }
         List<PlacedWidget> widgets = getPlacedWidgetsForPage(pageIdx);
         for (PlacedWidget w : widgets) {
             if (w.id == ignoreWidgetId) continue;
@@ -3798,7 +4973,6 @@ public class MainActivity extends Activity {
 
         View ghost = (pageIdx < pageGhostPreviews.size()) ? pageGhostPreviews.get(pageIdx) : null;
         overlay.removeAllViews();
-        pageGlanceViews.remove(pageIdx);
         List<View> wrappers = new ArrayList<>();
         pageWidgetWrappers.put(pageIdx, wrappers);
 
@@ -3808,27 +4982,8 @@ public class MainActivity extends Activity {
         }
 
         float density = getResources().getDisplayMetrics().density;
-        int cols = getGridColumns();
-        int rows = getGridRows();
 
-        // 1. Calendar (At a Glance) rendered directly at its exact (col, row) grid cells
-        if (isAtAGlanceVisible() && getAtAGlancePage() == pageIdx) {
-            int gSpanC = getGlanceSpanCols();
-            int gSpanR = getGlanceSpanRows();
-            int gCol = Math.max(0, Math.min(cols - gSpanC, getAtAGlanceCol()));
-            int gRow = Math.max(0, Math.min(rows - gSpanR, getAtAGlanceRow()));
-            int[] bounds = computeOverlayCellBounds(gv, gCol, gRow, gSpanC, gSpanR);
-
-            LinearLayout glanceView = createPageGlanceView();
-            FrameLayout.LayoutParams lpGlance = new FrameLayout.LayoutParams(bounds[2], bounds[3]);
-            lpGlance.leftMargin = bounds[0];
-            lpGlance.topMargin = bounds[1];
-            glanceView.setLayoutParams(lpGlance);
-            overlay.addView(glanceView);
-            pageGlanceViews.put(pageIdx, glanceView);
-        }
-
-        // 2. Android AppWidgets rendered at their exact (col, row, spanCols, spanRows) grid cells
+        // Android AppWidgets rendered at their exact (col, row, spanCols, spanRows) grid cells
         List<PlacedWidget> widgets = getPlacedWidgetsForPage(pageIdx);
         for (final PlacedWidget pw : widgets) {
             try {
@@ -3870,7 +5025,12 @@ public class MainActivity extends Activity {
                 final View.OnLongClickListener widgetDragListener = new View.OnLongClickListener() {
                     @Override
                     public boolean onLongClick(View v) {
-                        startDragWidget(pageIdx, pw.id, label, pw.spanCols, pw.spanRows, wrapper);
+                        handleDeferredViewLongClick(new Runnable() {
+                            @Override
+                            public void run() {
+                                startDragWidget(pageIdx, pw.id, label, pw.spanCols, pw.spanRows, wrapper);
+                            }
+                        }, widgetLongPressRunnable != null, LONG_PRESS_WIDGET_HOLD_MS);
                         return true;
                     }
                 };
@@ -4152,11 +5312,7 @@ public class MainActivity extends Activity {
     }
 
     private void launchWeather() {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather"));
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        } catch (Exception ignored) {}
+        LiveWeatherController.openPixelWeather(this);
     }
 
     private void launchGemini() {
@@ -4225,8 +5381,13 @@ public class MainActivity extends Activity {
             });
             searchBar.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
-                public boolean onLongClick(View v) {
-                    startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", v);
+                public boolean onLongClick(final View v) {
+                    handleDeferredViewLongClick(new Runnable() {
+                        @Override
+                        public void run() {
+                            startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", v);
+                        }
+                    }, searchBarLongPressRunnable != null, LONG_PRESS_SPECIAL_HOLD_MS);
                     return true;
                 }
             });
@@ -4236,8 +5397,13 @@ public class MainActivity extends Activity {
         if (searchContainer != null) {
             searchContainer.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
-                public boolean onLongClick(View v) {
-                    startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", v);
+                public boolean onLongClick(final View v) {
+                    handleDeferredViewLongClick(new Runnable() {
+                        @Override
+                        public void run() {
+                            startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", v);
+                        }
+                    }, searchBarLongPressRunnable != null, LONG_PRESS_SPECIAL_HOLD_MS);
                     return true;
                 }
             });
@@ -4246,6 +5412,16 @@ public class MainActivity extends Activity {
         View btnGoogle = findViewById(R.id.btn_google_g);
         if (btnGoogle != null) {
             btnGoogle.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    openGoogleApp();
+                }
+            });
+        }
+
+        View btnAiMode = findViewById(R.id.btn_ai_mode);
+        if (btnAiMode != null) {
+            btnAiMode.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     openGoogleWebSearch();
@@ -4274,98 +5450,201 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void setupOriginalGoogleSearchWidget() {
-        updateSearchBarVisibility();
-        final FrameLayout container = findViewById(R.id.search_bar_container);
-        if (container == null || appWidgetManager == null || appWidgetHost == null) return;
-
-        // Try candidate providers for the original Google search bar
-        ComponentName selectedProvider = null;
+    private ComponentName findGoogleSearchWidgetProvider() {
+        if (appWidgetManager == null) return null;
         String[] candidates = new String[]{
                 "com.google.android.apps.gsa.staticplugins.searchwidget.GoogleSearchWidgetProvider",
                 "com.google.android.googlequicksearchbox.SearchWidgetProvider",
                 "com.google.android.apps.gsa.staticplugins.searchwidget.PremiumSearchWidgetProvider"
         };
-
         try {
             List<AppWidgetProviderInfo> providers = appWidgetManager.getInstalledProviders();
             for (String cls : candidates) {
                 ComponentName cn = new ComponentName("com.google.android.googlequicksearchbox", cls);
                 for (AppWidgetProviderInfo info : providers) {
                     if (info.provider != null && info.provider.equals(cn)) {
-                        selectedProvider = cn;
-                        break;
+                        return cn;
                     }
                 }
-                if (selectedProvider != null) break;
             }
         } catch (Exception ignored) {}
+        return null;
+    }
 
+    private AppWidgetHostView obtainGoogleSearchWidgetHostView(
+            String prefKeyWidgetId,
+            int bindRequestCode,
+            boolean promptPermissionIfNeeded) {
+        if (appWidgetManager == null || appWidgetHost == null) return null;
+        ComponentName selectedProvider = findGoogleSearchWidgetProvider();
         if (selectedProvider == null) {
             Log.d("PixelLauncher", "Google Search Widget provider not found, keeping fallback");
-            return;
+            return null;
         }
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        int widgetId = prefs.getInt(PREF_GOOGLE_WIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
-        AppWidgetProviderInfo widgetInfo = null;
-
-        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-            widgetInfo = appWidgetManager.getAppWidgetInfo(widgetId);
-        }
+        int widgetId = prefs.getInt(prefKeyWidgetId, AppWidgetManager.INVALID_APPWIDGET_ID);
+        AppWidgetProviderInfo widgetInfo = widgetId != AppWidgetManager.INVALID_APPWIDGET_ID
+                ? appWidgetManager.getAppWidgetInfo(widgetId)
+                : null;
 
         if (widgetInfo == null) {
             try {
                 widgetId = appWidgetHost.allocateAppWidgetId();
                 boolean bound = appWidgetManager.bindAppWidgetIdIfAllowed(widgetId, selectedProvider);
                 if (!bound) {
-                    Intent bindIntent = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
-                    bindIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
-                    bindIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, selectedProvider);
-                    startActivityForResult(bindIntent, REQUEST_BIND_APPWIDGET);
-                    return;
+                    if (promptPermissionIfNeeded) {
+                        Intent bindIntent = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
+                        bindIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+                        bindIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, selectedProvider);
+                        startActivityForResult(bindIntent, bindRequestCode);
+                    } else {
+                        try { appWidgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
+                    }
+                    return null;
                 }
-                prefs.edit().putInt(PREF_GOOGLE_WIDGET_ID, widgetId).apply();
+                prefs.edit().putInt(prefKeyWidgetId, widgetId).apply();
                 widgetInfo = appWidgetManager.getAppWidgetInfo(widgetId);
             } catch (Exception e) {
                 Log.e("PixelLauncher", "Error allocating/binding widget: " + e.getMessage());
-                return;
+                return null;
             }
         }
 
-        if (widgetInfo != null) {
-            try {
-                if (searchWidgetHostView != null && searchWidgetHostView.getParent() instanceof ViewGroup) {
-                    ((ViewGroup) searchWidgetHostView.getParent()).removeView(searchWidgetHostView);
-                }
-                searchWidgetHostView = appWidgetHost.createView(this, widgetId, widgetInfo);
-                searchWidgetHostView.setAppWidget(widgetId, widgetInfo);
+        if (widgetInfo == null) return null;
+        try {
+            AppWidgetHostView hostView = appWidgetHost.createView(this, widgetId, widgetInfo);
+            hostView.setAppWidget(widgetId, widgetInfo);
+            hostView.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER_VERTICAL
+            ));
+            hostView.setClipToPadding(false);
+            return hostView;
+        } catch (Exception e) {
+            Log.e("PixelLauncher", "Error creating hostView: " + e.getMessage());
+            return null;
+        }
+    }
 
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                searchWidgetHostView.setLayoutParams(lp);
+    private void updateGoogleWidgetSizing(AppWidgetHostView hostView, float sideInsetDp, int minHeightDp, int maxHeightDp) {
+        if (hostView == null) return;
+        float density = getResources().getDisplayMetrics().density;
+        int wDp = Math.max(200, Math.round((getScreenWidth() / density) - sideInsetDp));
+        Bundle opts = new Bundle();
+        opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, wDp);
+        opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, wDp);
+        opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, minHeightDp);
+        opts.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, maxHeightDp);
+        hostView.updateAppWidgetSize(opts, wDp, minHeightDp, wDp, maxHeightDp);
+    }
 
-                searchWidgetHostView.setOnLongClickListener(new View.OnLongClickListener() {
+    private boolean isDrawerGoogleWidgetEnabled() {
+        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(PREF_KEY_DRAWER_USE_GOOGLE_WIDGET, false);
+    }
+
+    private void setDrawerGoogleWidgetEnabled(boolean enabled) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_KEY_DRAWER_USE_GOOGLE_WIDGET, enabled)
+                .apply();
+        syncDrawerSearchCapsuleMode(enabled);
+    }
+
+    private View getActiveDrawerSearchView() {
+        if (drawerGoogleWidgetContainer != null
+                && drawerGoogleWidgetContainer.getVisibility() == View.VISIBLE) {
+            return drawerGoogleWidgetContainer;
+        }
+        return drawerSearchBar;
+    }
+
+    private void syncDrawerSearchCapsuleMode(boolean promptPermissionIfNeeded) {
+        boolean useOriginalWidget = isDrawerGoogleWidgetEnabled();
+        if (!useOriginalWidget || drawerGoogleWidgetContainer == null) {
+            if (drawerGoogleWidgetContainer != null) {
+                drawerGoogleWidgetContainer.setVisibility(View.GONE);
+            }
+            if (drawerSearchBar != null) {
+                drawerSearchBar.setVisibility(View.VISIBLE);
+            }
+            return;
+        }
+
+        if (drawerSearchWidgetHostView == null) {
+            drawerSearchWidgetHostView = obtainGoogleSearchWidgetHostView(
+                    PREF_DRAWER_GOOGLE_WIDGET_ID,
+                    REQUEST_BIND_DRAWER_APPWIDGET,
+                    promptPermissionIfNeeded
+            );
+        }
+        if (drawerSearchWidgetHostView == null) {
+            drawerGoogleWidgetContainer.setVisibility(View.GONE);
+            if (drawerSearchBar != null) drawerSearchBar.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        if (drawerSearchWidgetHostView.getParent() instanceof ViewGroup
+                && drawerSearchWidgetHostView.getParent() != drawerGoogleWidgetContainer) {
+            ((ViewGroup) drawerSearchWidgetHostView.getParent()).removeView(drawerSearchWidgetHostView);
+        }
+        if (drawerSearchWidgetHostView.getParent() == null) {
+            drawerGoogleWidgetContainer.addView(drawerSearchWidgetHostView);
+        }
+        updateGoogleWidgetSizing(drawerSearchWidgetHostView, 32f, 54, 62);
+        hideKeyboard(etDrawerSearch);
+        if (etDrawerSearch != null && etDrawerSearch.length() > 0) {
+            etDrawerSearch.setText("");
+        }
+        if (drawerSearchBar != null) {
+            drawerSearchBar.setVisibility(View.GONE);
+        }
+        drawerGoogleWidgetContainer.setVisibility(View.VISIBLE);
+        if (drawerController == null || !drawerController.isVisibleOrAnimating()) {
+            drawerGoogleWidgetContainer.setTranslationY(0f);
+            drawerGoogleWidgetContainer.setScaleX(1f);
+            drawerGoogleWidgetContainer.setScaleY(1f);
+        }
+    }
+
+    private void setupOriginalGoogleSearchWidget() {
+        updateSearchBarVisibility();
+        final FrameLayout container = findViewById(R.id.search_bar_container);
+        if (container == null) return;
+
+        AppWidgetHostView newHostView = obtainGoogleSearchWidgetHostView(
+                PREF_GOOGLE_WIDGET_ID,
+                REQUEST_BIND_APPWIDGET,
+                true
+        );
+        if (newHostView == null) return;
+
+        if (searchWidgetHostView != null && searchWidgetHostView.getParent() instanceof ViewGroup) {
+            ((ViewGroup) searchWidgetHostView.getParent()).removeView(searchWidgetHostView);
+        }
+        searchWidgetHostView = newHostView;
+        searchWidgetHostView.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(final View v) {
+                final View activeParent = (v.getParent() instanceof View) ? (View) v.getParent() : container;
+                handleDeferredViewLongClick(new Runnable() {
                     @Override
-                    public boolean onLongClick(View v) {
-                        View activeParent = (v.getParent() instanceof View) ? (View) v.getParent() : container;
+                    public void run() {
                         startDragSpecialItem(SPECIAL_ITEM_SEARCH_BAR, "Google Search Bar", activeParent);
-                        return true;
                     }
-                });
-
-                View fallbackPill = findViewById(R.id.pixel_search_bar);
-                if (fallbackPill != null) {
-                    fallbackPill.setVisibility(View.GONE);
-                }
-                attachOriginalSearchWidgetToActiveContainer();
-                Log.d("PixelLauncher", "Original Google search bar widget attached successfully!");
-            } catch (Exception e) {
-                Log.e("PixelLauncher", "Error creating hostView: " + e.getMessage());
+                }, searchBarLongPressRunnable != null, LONG_PRESS_SPECIAL_HOLD_MS);
+                return true;
             }
+        });
+
+        View fallbackPill = findViewById(R.id.pixel_search_bar);
+        if (fallbackPill != null) {
+            fallbackPill.setVisibility(View.GONE);
         }
+        attachOriginalSearchWidgetToActiveContainer();
+        Log.d("PixelLauncher", "Original Google search bar widget attached successfully!");
     }
 
     @Override
@@ -4379,6 +5658,18 @@ public class MainActivity extends Activity {
                 }
                 setupOriginalGoogleSearchWidget();
             }
+        } else if (requestCode == REQUEST_BIND_DRAWER_APPWIDGET) {
+            if (resultCode == RESULT_OK) {
+                int widgetId = data != null ? data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) : -1;
+                if (widgetId != -1) {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(PREF_DRAWER_GOOGLE_WIDGET_ID, widgetId).apply();
+                }
+                syncDrawerSearchCapsuleMode(false);
+            } else if (resultCode == RESULT_CANCELED) {
+                setDrawerGoogleWidgetEnabled(false);
+            }
+        } else if (requestCode == REQUEST_LAUNCH_LENS) {
+            // Handled via startActivityForResult so LensExportedActivity receives non-empty callingPackage.
         } else if (requestCode == REQUEST_PICK_APPWIDGET) {
             if (resultCode == RESULT_OK) {
                 int widgetId = data != null ? data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) : -1;
@@ -4431,15 +5722,23 @@ public class MainActivity extends Activity {
     }
 
     private void openGoogleWebSearch() {
+        openGoogleWebSearch("");
+    }
+
+    private void openGoogleWebSearch(String query) {
+        String cleanQuery = query != null ? query.trim() : "";
         try {
             Intent intent = new Intent(Intent.ACTION_WEB_SEARCH);
             intent.setPackage("com.google.android.googlequicksearchbox");
-            intent.putExtra(SearchManager.QUERY, "");
+            intent.putExtra(SearchManager.QUERY, cleanQuery);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
         } catch (Exception e) {
             try {
-                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"));
+                String url = cleanQuery.isEmpty()
+                        ? "https://www.google.com"
+                        : "https://www.google.com/search?q=" + Uri.encode(cleanQuery);
+                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 browserIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(browserIntent);
             } catch (Exception ex) {
@@ -4448,38 +5747,99 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void openGoogleVoiceSearch() {
+    private void openGoogleApp() {
         try {
-            Intent intent = new Intent("android.speech.action.WEB_SEARCH");
-            intent.setPackage("com.google.android.googlequicksearchbox");
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        } catch (Exception e) {
-            try {
-                Intent recIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                recIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                recIntent.setPackage("com.google.android.googlequicksearchbox");
-                recIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(recIntent);
-            } catch (Exception ex) {
-                Toast.makeText(this, "Google Voice Search not available", Toast.LENGTH_SHORT).show();
+            Intent launch = getPackageManager().getLaunchIntentForPackage("com.google.android.googlequicksearchbox");
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(launch);
+                return;
             }
+        } catch (Exception ignored) {}
+        try {
+            Intent cmp = new Intent(Intent.ACTION_MAIN);
+            cmp.addCategory(Intent.CATEGORY_LAUNCHER);
+            cmp.setComponent(new ComponentName("com.google.android.googlequicksearchbox",
+                    "com.google.android.googlequicksearchbox.SearchActivity"));
+            cmp.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivity(cmp);
+            return;
+        } catch (Exception ignored) {}
+        openGoogleWebSearch("");
+    }
+
+    private void openGoogleVoiceSearch() {
+        String[] actions = new String[]{
+                "android.intent.action.VOICE_ASSIST",
+                "com.google.android.googlequicksearchbox.action.CLASSIC_GSA_VOICE_SEARCH",
+                "android.speech.action.WEB_SEARCH",
+                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+        };
+        for (String act : actions) {
+            try {
+                Intent intent = new Intent(act);
+                intent.setPackage("com.google.android.googlequicksearchbox");
+                if (RecognizerIntent.ACTION_RECOGNIZE_SPEECH.equals(act)) {
+                    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                }
+                if (intent.resolveActivity(getPackageManager()) == null) continue;
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(intent);
+                return;
+            } catch (Exception ignored) {}
+        }
+        try {
+            Intent generic = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            generic.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            generic.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(generic);
+        } catch (Exception ex) {
+            Toast.makeText(this, "Google Voice Search not available", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean tryStartLensForResult(Intent intent) {
+        if (intent == null || intent.resolveActivity(getPackageManager()) == null) return false;
+        try {
+            // LensExportedActivity rejects launches whose getCallingPackage() is null (FLAG_ACTIVITY_NEW_TASK).
+            startActivityForResult(intent, REQUEST_LAUNCH_LENS);
+            return true;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
     private void openGoogleLens() {
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("googleapp://lens"));
-            intent.setPackage("com.google.android.googlequicksearchbox");
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            return;
+            Intent deeplink = new Intent(Intent.ACTION_VIEW, Uri.parse("https://search.google/ways-to-search/lens/try"));
+            deeplink.setPackage("com.google.android.googlequicksearchbox");
+            if (deeplink.resolveActivity(getPackageManager()) != null) {
+                deeplink.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(deeplink);
+                return;
+            }
         } catch (Exception ignored) {}
+
+        Intent lensUri = new Intent(Intent.ACTION_VIEW, Uri.parse("google://lens"));
+        lensUri.setPackage("com.google.android.googlequicksearchbox");
+        if (tryStartLensForResult(lensUri)) return;
+
+        String[] lensActivities = new String[]{
+                "com.google.android.apps.search.lens.LensExportedActivity",
+                "com.google.android.apps.lens.MainActivity"
+        };
+        for (String cls : lensActivities) {
+            Intent cmp = new Intent();
+            cmp.setComponent(new ComponentName("com.google.android.googlequicksearchbox", cls));
+            if (tryStartLensForResult(cmp)) return;
+        }
 
         try {
             Intent intent = getPackageManager().getLaunchIntentForPackage("com.google.ar.lens");
             if (intent != null) {
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(intent);
                 return;
             }
@@ -4513,6 +5873,9 @@ public class MainActivity extends Activity {
                         lastTouchRawX = event.getRawX();
                         lastTouchRawY = event.getRawY();
                     }
+                    if (slot < dockApps.size() && dockApps.get(slot) != null) {
+                        UiMotion.handleIconPressMotion(v, event);
+                    }
                     return false;
                 }
             });
@@ -4520,9 +5883,10 @@ public class MainActivity extends Activity {
             iv.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
                     AppInfo app = (slot < dockApps.size()) ? dockApps.get(slot) : null;
                     if (app != null) {
-                        launchApp(app);
+                        launchApp(app, v);
                     } else {
                         Toast.makeText(MainActivity.this, "Drag an app here to place on dock", Toast.LENGTH_SHORT).show();
                     }
@@ -4531,11 +5895,21 @@ public class MainActivity extends Activity {
 
             iv.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
-                public boolean onLongClick(View v) {
-                    AppInfo app = (slot < dockApps.size()) ? dockApps.get(slot) : null;
+                public boolean onLongClick(final View v) {
+                    boolean drawerOpen = (drawerController != null && drawerController.isVisibleOrAnimating());
+                    if (drawerOpen || !canStartGestureDragHold()) {
+                        return false;
+                    }
+                    final AppInfo app = (slot < dockApps.size()) ? dockApps.get(slot) : null;
                     if (app != null) {
-                        v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                        startDragDockApp(slot, app, v);
+                        scheduleDeferredDragHold(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (drawerController == null || !drawerController.isVisibleOrAnimating()) {
+                                    startDragDockApp(slot, app, v);
+                                }
+                            }
+                        }, LONG_PRESS_ICON_HOLD_MS);
                         return true;
                     }
                     return false;
@@ -4697,8 +6071,7 @@ public class MainActivity extends Activity {
                 (int) (236 * getResources().getDisplayMetrics().density),
                 ViewGroup.LayoutParams.WRAP_CONTENT, true);
 
-        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popupWindow.setElevation(24f);
+        preparePixelPopupWindow(popupWindow, 24f);
 
         TextView tvTitle = popupView.findViewById(R.id.dock_popup_title);
         if (tvTitle != null) {
@@ -4763,19 +6136,38 @@ public class MainActivity extends Activity {
             vRemove.setVisibility(View.GONE);
         }
 
+        // Uninstall (only for user-installed / removable apps)
+        View vUninstall = popupView.findViewById(R.id.dock_item_uninstall);
+        boolean dockCanUninstall = (currentApp != null && isAppUninstallable(currentApp.packageName));
+        if (vUninstall != null) {
+            if (dockCanUninstall) {
+                vUninstall.setVisibility(View.VISIBLE);
+                vUninstall.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        popupWindow.dismiss();
+                        requestAppUninstall(currentApp);
+                    }
+                });
+            } else {
+                vUninstall.setVisibility(View.GONE);
+            }
+        }
+
         int[] screenPos = new int[2];
         anchor.getLocationOnScreen(screenPos);
         int density = (int) getResources().getDisplayMetrics().density;
         int popupW = (int) (236 * density);
         int x = screenPos[0] + (anchor.getWidth() / 2) - (popupW / 2);
         x = Math.max(20, Math.min(x, getScreenWidth() - popupW - 20));
-        int y = screenPos[1] - (int) (210 * density);
+        int liftDp = dockCanUninstall ? 255 : 210;
+        int y = screenPos[1] - (int) (liftDp * density);
         if (y < 60) {
             y = screenPos[1] - (int) (160 * density);
         }
 
         popupWindow.showAtLocation(rootLayout, Gravity.NO_GRAVITY, x, y);
-        animatePopIn(popupView);
+        animateAnchoredPopupIn(popupView, anchor, x, y, popupW);
     }
 
     private void showAppPickerDialog(final int slot) {
@@ -4793,14 +6185,13 @@ public class MainActivity extends Activity {
         EditText etSearch = dialogView.findViewById(R.id.picker_search);
         GridView gv = dialogView.findViewById(R.id.picker_grid);
 
-        final AppAdapter pickerAdapter = new AppAdapter(this, appList);
+        final AppAdapter pickerAdapter = new AppAdapter(this, appList, 50, 11.5f);
         gv.setAdapter(pickerAdapter);
 
         int width = (int) (320 * getResources().getDisplayMetrics().density);
         int height = (int) (460 * getResources().getDisplayMetrics().density);
         final PopupWindow pickerPopup = new PopupWindow(dialogView, width, height, true);
-        pickerPopup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        pickerPopup.setElevation(28f);
+        preparePixelPopupWindow(pickerPopup, 28f);
 
         gv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -4828,32 +6219,102 @@ public class MainActivity extends Activity {
         });
 
         pickerPopup.showAtLocation(rootLayout, Gravity.CENTER, 0, 0);
-        animatePopIn(dialogView);
+        UiMotion.animatePopIn(dialogView, 0.5f, 0.5f, 12f);
     }
 
     private void setupDrawer() {
         appAdapter = new AppAdapter(this, appList);
         gvApps.setAdapter(appAdapter);
+        applyRefreshAdaptedScrollPhysics();
+        if (drawerScrollbar != null && gvApps != null) {
+            drawerScrollbar.attachToGridView(gvApps, appAdapter);
+            drawerScrollbar.setOnExternalScrollListener(new AbsListView.OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(AbsListView view, int scrollState) {}
+
+                @Override
+                public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+                    syncDrawerHeaderScroll();
+                }
+            });
+        }
+
+        if (btnDrawerMic != null) {
+            btnDrawerMic.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
+                    hideKeyboard(etDrawerSearch);
+                    openGoogleVoiceSearch();
+                }
+            });
+        }
+        if (btnDrawerLens != null) {
+            btnDrawerLens.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
+                    hideKeyboard(etDrawerSearch);
+                    openGoogleLens();
+                }
+            });
+        }
+        if (drawerSearchBar != null) {
+            drawerSearchBar.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
+                    focusDrawerSearchInput();
+                }
+            });
+        }
+        if (ivDrawerSearchIcon != null) {
+            ivDrawerSearchIcon.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
+                    hideKeyboard(etDrawerSearch);
+                    openGoogleApp();
+                }
+            });
+        }
+        syncDrawerSearchCapsuleMode(false);
 
         gvApps.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                if (!isGestureTapEligible()) return;
                 AppInfo app = appAdapter.getItem(position);
                 if (app != null) {
-                    launchApp(app);
+                    View iconView = view != null ? view.findViewById(R.id.iv_app_icon) : null;
+                    launchApp(app, iconView != null ? iconView : view);
                 }
             }
         });
 
         gvApps.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
-            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                if (drawerController != null && drawerController.isDragging()) return true;
+            public boolean onItemLongClick(AdapterView<?> parent, final View view, int position, long id) {
+                if (!canStartGestureDragHold()) return false;
                 final AppInfo app = appAdapter.getItem(position);
                 if (app == null) return false;
-                closeAppDrawer();
-                startDragItem(null, new LauncherItem(app), -1, -1);
+                scheduleDeferredDragHold(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (drawerController != null && drawerController.isVisibleOrAnimating() && !drawerController.isDragging()) {
+                            startDragFromDrawer(view, app);
+                        }
+                    }
+                }, LONG_PRESS_DRAWER_HOLD_MS);
                 return true;
+            }
+        });
+
+        etDrawerSearch.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                boolean expanded = hasFocus || (etDrawerSearch != null && etDrawerSearch.length() > 0);
+                animateDrawerSearchBarExpand(expanded);
             }
         });
 
@@ -4863,57 +6324,1111 @@ public class MainActivity extends Activity {
 
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                if (appAdapter != null) {
-                    appAdapter.getFilter().filter(s);
-                }
+                handleDrawerSearchQueryChanged(s);
             }
 
             @Override
             public void afterTextChanged(Editable s) {}
         });
 
-        View btnClose = findViewById(R.id.btn_close_drawer);
-        btnClose.setOnClickListener(new View.OnClickListener() {
+        etDrawerSearch.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
-            public void onClick(View v) {
-                closeAppDrawer();
+            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                if (actionId == EditorInfo.IME_ACTION_SEARCH
+                        || actionId == EditorInfo.IME_ACTION_GO
+                        || actionId == EditorInfo.IME_ACTION_DONE) {
+                    return submitDrawerSearch();
+                }
+                return false;
             }
         });
+
+        etDrawerSearch.setOnKeyListener(new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_ENTER && event != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+                    return submitDrawerSearch();
+                }
+                return false;
+            }
+        });
+
+        if (btnCloseDrawer != null) {
+            btnCloseDrawer.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (etDrawerSearch != null && etDrawerSearch.length() > 0) {
+                        etDrawerSearch.setText("");
+                        focusDrawerSearchInput();
+                    } else {
+                        closeAppDrawer();
+                    }
+                }
+            });
+        }
+    }
+
+    private void focusDrawerSearchInput() {
+        if (etDrawerSearch == null) return;
+        etDrawerSearch.requestFocus();
+        if (etDrawerSearch.getText() != null) {
+            etDrawerSearch.setSelection(etDrawerSearch.getText().length());
+        }
+        showKeyboard(etDrawerSearch);
+    }
+
+    private void animateDrawerSearchBarExpand(boolean expanded) {
+        if (drawerSearchBar == null) return;
+        ViewGroup.LayoutParams rawLp = drawerSearchBar.getLayoutParams();
+        if (!(rawLp instanceof ViewGroup.MarginLayoutParams)) return;
+        final ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) rawLp;
+        float density = getResources().getDisplayMetrics().density;
+        final int targetMargin = Math.round((expanded ? 10f : 22f) * density);
+        final int startMargin = lp.leftMargin;
+        if (drawerSearchMarginAnimator != null) {
+            drawerSearchMarginAnimator.cancel();
+            drawerSearchMarginAnimator = null;
+        }
+        if (startMargin == targetMargin) return;
+        final DisplayRefreshHelper.FramePacer pacer = new DisplayRefreshHelper.FramePacer();
+        drawerSearchMarginAnimator = ValueAnimator.ofInt(startMargin, targetMargin);
+        drawerSearchMarginAnimator.setDuration(DisplayRefreshHelper.scaleDurationMs(160L));
+        drawerSearchMarginAnimator.setInterpolator(new DecelerateInterpolator(1.8f));
+        drawerSearchMarginAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                if (drawerSearchBar == null) return;
+                if (!pacer.shouldRender(animation)) return;
+                int m = (Integer) animation.getAnimatedValue();
+                lp.leftMargin = m;
+                lp.rightMargin = m;
+                lp.setMarginStart(m);
+                lp.setMarginEnd(m);
+                drawerSearchBar.setLayoutParams(lp);
+            }
+        });
+        drawerSearchMarginAnimator.start();
+    }
+
+    private boolean submitDrawerSearch() {
+        String q = etDrawerSearch != null ? etDrawerSearch.getText().toString().trim() : "";
+        if (q.isEmpty()) return false;
+        hideKeyboard(etDrawerSearch);
+        List<AppInfo> matches = AppAdapter.rankMatches(appList, q);
+        if (!matches.isEmpty()) {
+            launchApp(matches.get(0), null);
+            return true;
+        }
+        openGoogleWebSearch(q);
+        return true;
+    }
+
+    private void handleDrawerSearchQueryChanged(CharSequence s) {
+        final int seq = ++drawerSearchSeq;
+        if (pendingWebSuggestRunnable != null) {
+            mainHandler.removeCallbacks(pendingWebSuggestRunnable);
+            pendingWebSuggestRunnable = null;
+        }
+
+        String raw = s != null ? s.toString() : "";
+        final String trimmed = raw.trim();
+        boolean hasQuery = !trimmed.isEmpty();
+        lastDrawerSearchQuery = trimmed;
+
+        if (btnDrawerMic != null) {
+            btnDrawerMic.setVisibility(hasQuery ? View.GONE : View.VISIBLE);
+        }
+        if (btnDrawerLens != null) {
+            btnDrawerLens.setVisibility(hasQuery ? View.GONE : View.VISIBLE);
+        }
+        if (btnCloseDrawer != null) {
+            btnCloseDrawer.setVisibility(hasQuery ? View.VISIBLE : View.GONE);
+            btnCloseDrawer.setImageResource(R.drawable.ic_close);
+            btnCloseDrawer.setContentDescription("Clear search");
+        }
+
+        boolean focusedOrHasText = hasQuery || (etDrawerSearch != null && etDrawerSearch.hasFocus());
+        animateDrawerSearchBarExpand(focusedOrHasText);
+
+        if (!hasQuery) {
+            lastDrawerSuggestions.clear();
+            if (tvDrawerTypeaheadHint != null) {
+                tvDrawerTypeaheadHint.setText("");
+                tvDrawerTypeaheadHint.setVisibility(View.GONE);
+            }
+            if (svDrawerSearchResults != null) {
+                svDrawerSearchResults.setVisibility(View.GONE);
+            }
+            if (gvApps != null) {
+                gvApps.setVisibility(View.VISIBLE);
+            }
+            if (drawerScrollbar != null) {
+                drawerScrollbar.setVisibility(View.VISIBLE);
+            }
+            if (appAdapter != null) {
+                appAdapter.filterSync("");
+            }
+            if (drawerScrollbar != null) {
+                drawerScrollbar.notifyListChanged();
+            }
+            updateDrawerGridPadding();
+            syncDrawerHeaderScroll();
+            return;
+        }
+
+        if (gvApps != null) gvApps.setVisibility(View.GONE);
+        if (llDrawerHeaderOverlay != null) llDrawerHeaderOverlay.setVisibility(View.GONE);
+        if (drawerScrollbar != null) drawerScrollbar.setVisibility(View.GONE);
+        if (svDrawerSearchResults != null) {
+            svDrawerSearchResults.setVisibility(View.VISIBLE);
+            svDrawerSearchResults.scrollTo(0, 0);
+        }
+
+        final List<AppInfo> matches = AppAdapter.rankMatches(appList, trimmed);
+        if (appAdapter != null) {
+            appAdapter.filterSync(trimmed);
+        }
+        updateDrawerTypeaheadHint(raw, matches);
+        renderDrawerSearchResults(trimmed, matches, Collections.<String>emptyList());
+        scheduleLiveWebSuggestions(trimmed, seq, matches);
+    }
+
+    private void updateDrawerTypeaheadHint(String rawInput, List<AppInfo> matches) {
+        if (tvDrawerTypeaheadHint == null) return;
+        if (rawInput == null || rawInput.isEmpty() || matches == null || matches.isEmpty()) {
+            tvDrawerTypeaheadHint.setText("");
+            tvDrawerTypeaheadHint.setVisibility(View.GONE);
+            return;
+        }
+        String label = matches.get(0).label;
+        if (label == null || label.length() <= rawInput.length()) {
+            tvDrawerTypeaheadHint.setText("");
+            tvDrawerTypeaheadHint.setVisibility(View.GONE);
+            return;
+        }
+        if (!label.toLowerCase(Locale.ROOT).startsWith(rawInput.toLowerCase(Locale.ROOT))) {
+            tvDrawerTypeaheadHint.setText("");
+            tvDrawerTypeaheadHint.setVisibility(View.GONE);
+            return;
+        }
+
+        boolean isNight = LauncherTheme.isNightMode(this);
+        String completion = label.substring(rawInput.length());
+        if (Character.isLowerCase(rawInput.charAt(0))) {
+            completion = completion.toLowerCase(Locale.getDefault());
+        }
+        String full = rawInput + completion + " - open";
+        SpannableString span = new SpannableString(full);
+        int prefixLen = rawInput.length();
+        int completionEnd = prefixLen + completion.length();
+        span.setSpan(new ForegroundColorSpan(Color.TRANSPARENT), 0, prefixLen, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        int hintColor = LauncherTheme.textSecondary(isNight);
+        span.setSpan(new ForegroundColorSpan(hintColor), prefixLen, full.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        int highlightBg = isNight ? 0x28FFFFFF : 0x1A000000;
+        span.setSpan(new BackgroundColorSpan(highlightBg), prefixLen, completionEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tvDrawerTypeaheadHint.setText(span);
+        tvDrawerTypeaheadHint.setVisibility(View.VISIBLE);
+    }
+
+    private void scheduleLiveWebSuggestions(final String query, final int seq, final List<AppInfo> matches) {
+        pendingWebSuggestRunnable = new Runnable() {
+            @Override
+            public void run() {
+                appLoaderExecutor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (seq != drawerSearchSeq) return;
+                        final List<String> fetched = fetchGoogleSuggestSync(query);
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (seq != drawerSearchSeq) return;
+                                if (svDrawerSearchResults == null || svDrawerSearchResults.getVisibility() != View.VISIBLE) return;
+                                lastDrawerSuggestions.clear();
+                                lastDrawerSuggestions.addAll(fetched);
+                                renderDrawerSearchResults(query, matches, fetched);
+                            }
+                        });
+                    }
+                });
+            }
+        };
+        mainHandler.postDelayed(pendingWebSuggestRunnable, 110L);
+    }
+
+    private List<String> fetchGoogleSuggestSync(String query) {
+        List<String> out = new ArrayList<>();
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://suggestqueries.google.com/complete/search?client=firefox&q=" + Uri.encode(query));
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(2500);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            if (conn.getResponseCode() == 200) {
+                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) {
+                    sb.append(line);
+                }
+                br.close();
+                JSONArray root = new JSONArray(sb.toString());
+                JSONArray arr = root.optJSONArray(1);
+                if (arr != null) {
+                    for (int i = 0; i < arr.length() && out.size() < 4; i++) {
+                        String s = arr.optString(i, "").trim();
+                        if (s.isEmpty()) continue;
+                        boolean dup = false;
+                        for (String existing : out) {
+                            if (existing.equalsIgnoreCase(s)) {
+                                dup = true;
+                                break;
+                            }
+                        }
+                        if (!dup) out.add(s);
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return out;
+    }
+
+    private void renderDrawerSearchResults(final String query, List<AppInfo> matches, List<String> suggestions) {
+        if (llDrawerSearchResultsContent == null) return;
+        llDrawerSearchResultsContent.removeAllViews();
+        if (query == null || query.isEmpty()) return;
+
+        boolean isNight = LauncherTheme.isNightMode(this);
+        float density = getResources().getDisplayMetrics().density;
+        int primaryText = LauncherTheme.textPrimary(isNight);
+        int secondaryIcon = LauncherTheme.iconSecondary(isNight);
+
+        if (matches != null && !matches.isEmpty()) {
+            int maxApps = Math.min(8, matches.size());
+            for (int start = 0; start < maxApps; start += 4) {
+                int end = Math.min(start + 4, maxApps);
+                llDrawerSearchResultsContent.addView(
+                        createSearchMatchedAppsRow(matches, start, end, start == 0, isNight, density, primaryText));
+            }
+            View appSpacer = new View(this);
+            appSpacer.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, Math.round(10f * density)));
+            llDrawerSearchResultsContent.addView(appSpacer);
+        }
+
+        llDrawerSearchResultsContent.addView(
+                createSearchSectionHeader("Web search", density, primaryText, secondaryIcon, new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        hideKeyboard(etDrawerSearch);
+                        openGoogleWebSearch(query);
+                    }
+                }));
+
+        List<String> rows = new ArrayList<>();
+        if (suggestions != null && !suggestions.isEmpty()) {
+            rows.addAll(suggestions);
+        } else {
+            rows.add(query);
+        }
+        int totalRows = rows.size();
+        for (int i = 0; i < totalRows; i++) {
+            llDrawerSearchResultsContent.addView(
+                    createSearchSuggestionRow(rows.get(i), i, totalRows, isNight, density, primaryText, secondaryIcon));
+        }
+
+        View storeSpacer = new View(this);
+        storeSpacer.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.round(12f * density)));
+        llDrawerSearchResultsContent.addView(storeSpacer);
+
+        llDrawerSearchResultsContent.addView(
+                createSearchSectionHeader("Play Store", density, primaryText, secondaryIcon, new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        openPlayStoreSearch(query);
+                    }
+                }));
+        llDrawerSearchResultsContent.addView(
+                createPlayStoreSearchRow(query, isNight, density, primaryText, secondaryIcon));
+    }
+
+    private LinearLayout createSearchMatchedAppsRow(
+            List<AppInfo> matches,
+            int start,
+            int end,
+            boolean highlightFirst,
+            boolean isNight,
+            float density,
+            int primaryText) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setWeightSum(4f);
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.setPadding(0, Math.round(4f * density), 0, Math.round(4f * density));
+
+        LayoutInflater inflater = LayoutInflater.from(this);
+        int iconPx = Math.round(54f * density);
+        int padH = Math.round(4f * density);
+        int padV = Math.round(10f * density);
+
+        for (int i = 0; i < 4; i++) {
+            int idx = start + i;
+            if (idx >= end) {
+                View spacer = new View(this);
+                spacer.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1f));
+                row.addView(spacer);
+                continue;
+            }
+            final AppInfo app = matches.get(idx);
+            final View slotView = inflater.inflate(R.layout.item_app_grid, row, false);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            slotView.setLayoutParams(lp);
+            slotView.setPadding(padH, padV, padH, padV);
+            if (highlightFirst && i == 0) {
+                int hlFill = isNight ? 0x26FFFFFF : 0x1E000000;
+                slotView.setBackground(LauncherTheme.makeRoundedRectDrawable(
+                        hlFill, Color.TRANSPARENT, 20f * density, 0));
+            }
+            final ImageView iv = slotView.findViewById(R.id.iv_app_icon);
+            TextView tv = slotView.findViewById(R.id.tv_app_label);
+            if (iv != null) {
+                ViewGroup.LayoutParams ilp = iv.getLayoutParams();
+                if (ilp != null) {
+                    ilp.width = iconPx;
+                    ilp.height = iconPx;
+                    iv.setLayoutParams(ilp);
+                }
+                if (app.icon != null) iv.setImageDrawable(app.icon);
+                UiMotion.attachIconTouchSpring(slotView, iv);
+            }
+            if (tv != null) {
+                tv.setText(app.label);
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+                tv.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+                tv.setTextColor(primaryText);
+                tv.setSingleLine(true);
+                tv.setEllipsize(TextUtils.TruncateAt.END);
+            }
+            slotView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
+                    hideKeyboard(etDrawerSearch);
+                    launchApp(app, iv != null ? iv : slotView);
+                }
+            });
+            slotView.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    if (!canStartGestureDragHold()) return false;
+                    scheduleDeferredDragHold(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (drawerController != null && drawerController.isVisibleOrAnimating() && !drawerController.isDragging()) {
+                                hideKeyboard(etDrawerSearch);
+                                startDragFromDrawer(slotView, app);
+                            }
+                        }
+                    }, LONG_PRESS_DRAWER_HOLD_MS);
+                    return true;
+                }
+            });
+            row.addView(slotView);
+        }
+        return row;
+    }
+
+    private LinearLayout createSearchSectionHeader(
+            String title,
+            float density,
+            int primaryText,
+            int secondaryIcon,
+            View.OnClickListener listener) {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.round(42f * density)));
+        header.setPadding(Math.round(8f * density), 0, Math.round(8f * density), 0);
+        header.setBackgroundResource(R.drawable.popup_item_bg);
+        header.setClickable(true);
+        header.setFocusable(true);
+        header.setOnClickListener(listener);
+
+        TextView tv = new TextView(this);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tv.setLayoutParams(tlp);
+        tv.setText(title);
+        tv.setTextColor(primaryText);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15.5f);
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        header.addView(tv);
+
+        ImageView chevron = new ImageView(this);
+        int cSize = Math.round(18f * density);
+        chevron.setLayoutParams(new LinearLayout.LayoutParams(cSize, cSize));
+        chevron.setImageResource(R.drawable.ic_arrow_up);
+        chevron.setRotation(90f);
+        chevron.setColorFilter(secondaryIcon);
+        header.addView(chevron);
+        return header;
+    }
+
+    private LinearLayout createSearchSuggestionRow(
+            final String suggestionText,
+            int index,
+            int totalCount,
+            boolean isNight,
+            float density,
+            int primaryText,
+            int secondaryIcon) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.round(54f * density));
+        if (index < totalCount - 1) {
+            rowLp.bottomMargin = Math.round(2f * density);
+        }
+        row.setLayoutParams(rowLp);
+        row.setPadding(Math.round(14f * density), 0, Math.round(12f * density), 0);
+
+        float topR = (index == 0) ? 20f * density : 6f * density;
+        float botR = (index == totalCount - 1) ? 20f * density : 6f * density;
+        int cardFill = isNight ? 0x22FFFFFF : 0xCCFFFFFF;
+        row.setBackground(LauncherTheme.makeSegmentedRowDrawable(cardFill, Color.TRANSPARENT, topR, botR, 0));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                hideKeyboard(etDrawerSearch);
+                openGoogleWebSearch(suggestionText);
+            }
+        });
+
+        FrameLayout badge = new FrameLayout(this);
+        int badgeSize = Math.round(32f * density);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(badgeSize, badgeSize);
+        blp.rightMargin = Math.round(14f * density);
+        badge.setLayoutParams(blp);
+        badge.setBackground(LauncherTheme.makeRoundedRectDrawable(
+                isNight ? 0x2C000000 : 0x12000000, Color.TRANSPARENT, badgeSize * 0.5f, 0));
+
+        ImageView icon = new ImageView(this);
+        int iconSize = Math.round(16f * density);
+        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER);
+        icon.setLayoutParams(ilp);
+        icon.setImageResource(R.drawable.ic_search);
+        icon.setColorFilter(secondaryIcon);
+        badge.addView(icon);
+        row.addView(badge);
+
+        TextView tv = new TextView(this);
+        tv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        tv.setText(suggestionText);
+        tv.setTextColor(primaryText);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+        tv.setSingleLine(true);
+        tv.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(tv);
+
+        ImageView fillBtn = new ImageView(this);
+        int fillSize = Math.round(34f * density);
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(fillSize, fillSize);
+        flp.leftMargin = Math.round(4f * density);
+        fillBtn.setLayoutParams(flp);
+        int pad = Math.round(8f * density);
+        fillBtn.setPadding(pad, pad, pad, pad);
+        fillBtn.setImageResource(R.drawable.ic_arrow_up);
+        fillBtn.setRotation(-45f);
+        fillBtn.setColorFilter(secondaryIcon);
+        fillBtn.setBackgroundResource(R.drawable.popup_item_bg);
+        fillBtn.setClickable(true);
+        fillBtn.setFocusable(true);
+        fillBtn.setContentDescription("Fill search query");
+        fillBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (etDrawerSearch != null) {
+                    etDrawerSearch.setText(suggestionText);
+                    etDrawerSearch.setSelection(suggestionText.length());
+                }
+            }
+        });
+        row.addView(fillBtn);
+        return row;
+    }
+
+    private LinearLayout createPlayStoreSearchRow(
+            final String query,
+            boolean isNight,
+            float density,
+            int primaryText,
+            int secondaryIcon) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.round(52f * density)));
+        row.setPadding(Math.round(14f * density), 0, Math.round(14f * density), 0);
+        int cardFill = isNight ? 0x22FFFFFF : 0xCCFFFFFF;
+        row.setBackground(LauncherTheme.makeSegmentedRowDrawable(
+                cardFill, Color.TRANSPARENT, 20f * density, 20f * density, 0));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openPlayStoreSearch(query);
+            }
+        });
+
+        FrameLayout badge = new FrameLayout(this);
+        int badgeSize = Math.round(32f * density);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(badgeSize, badgeSize);
+        blp.rightMargin = Math.round(14f * density);
+        badge.setLayoutParams(blp);
+        badge.setBackground(LauncherTheme.makeRoundedRectDrawable(
+                isNight ? 0x2C000000 : 0x12000000, Color.TRANSPARENT, badgeSize * 0.5f, 0));
+
+        ImageView icon = new ImageView(this);
+        int iconSize = Math.round(16f * density);
+        icon.setLayoutParams(new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
+        icon.setImageResource(R.drawable.ic_search);
+        icon.setColorFilter(secondaryIcon);
+        badge.addView(icon);
+        row.addView(badge);
+
+        TextView tv = new TextView(this);
+        tv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        tv.setText("Search \"" + query + "\" in Play Store");
+        tv.setTextColor(primaryText);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        tv.setSingleLine(true);
+        tv.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(tv);
+        return row;
+    }
+
+    private void openPlayStoreSearch(String query) {
+        hideKeyboard(etDrawerSearch);
+        String encoded = Uri.encode(query != null ? query.trim() : "");
+        try {
+            Intent market = new Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=" + encoded + "&c=apps"));
+            market.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(market);
+        } catch (Exception e) {
+            try {
+                Intent web = new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/search?q=" + encoded + "&c=apps"));
+                web.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(web);
+            } catch (Exception ignored) {
+                Toast.makeText(this, "Play Store not available", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void syncDrawerHeaderScroll() {
+        if (llDrawerHeaderOverlay == null || gvApps == null) return;
+        boolean hasQuery = (etDrawerSearch != null && etDrawerSearch.length() > 0);
+        if (hasQuery || llDrawerPredictions == null || llDrawerPredictions.getChildCount() == 0) {
+            llDrawerHeaderOverlay.setVisibility(View.GONE);
+            return;
+        }
+        if (llDrawerHeaderOverlay.getVisibility() != View.VISIBLE) {
+            llDrawerHeaderOverlay.setVisibility(View.VISIBLE);
+        }
+        int headerH = drawerHeaderHeightPx > 0 ? drawerHeaderHeightPx : llDrawerHeaderOverlay.getHeight();
+        if (headerH <= 0) return;
+
+        float transY;
+        if (gvApps.getChildCount() == 0) {
+            transY = 0f;
+        } else if (gvApps.getFirstVisiblePosition() == 0) {
+            View first = gvApps.getChildAt(0);
+            int topPad = gvApps.getPaddingTop();
+            transY = Math.min(0f, (float) (first.getTop() - topPad));
+        } else {
+            transY = -headerH;
+        }
+        llDrawerHeaderOverlay.setTranslationY(transY);
+        float fadeDist = Math.max(1f, headerH * 0.78f);
+        llDrawerHeaderOverlay.setAlpha(Math.max(0f, Math.min(1f, 1f + (transY / fadeDist))));
+    }
+
+    private void recordAppLaunchForPredictions(String packageName) {
+        if (packageName == null || packageName.isEmpty()) return;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            JSONObject obj = new JSONObject(prefs.getString(PREF_KEY_APP_LAUNCH_HISTORY, "{}"));
+            JSONObject entry = obj.optJSONObject(packageName);
+            if (entry == null) entry = new JSONObject();
+            int count = entry.optInt("c", 0) + 1;
+            entry.put("c", count);
+            entry.put("t", System.currentTimeMillis());
+            obj.put(packageName, entry);
+            prefs.edit().putString(PREF_KEY_APP_LAUNCH_HISTORY, obj.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    private void refreshDrawerPredictions() {
+        if (llDrawerPredictions == null) return;
+        llDrawerPredictions.removeAllViews();
+        if (appList.isEmpty()) {
+            updateDrawerGridPadding();
+            syncDrawerHeaderScroll();
+            return;
+        }
+
+        final Map<String, Double> scores = new HashMap<>();
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            JSONObject obj = new JSONObject(prefs.getString(PREF_KEY_APP_LAUNCH_HISTORY, "{}"));
+            long now = System.currentTimeMillis();
+            for (AppInfo app : appList) {
+                JSONObject e = obj.optJSONObject(app.packageName);
+                if (e != null) {
+                    int cnt = e.optInt("c", 0);
+                    long t = e.optLong("t", 0L);
+                    double hoursAgo = Math.max(0.1, (now - t) / 3600000.0);
+                    double score = cnt * 2.5 + Math.max(0.0, 24.0 - hoursAgo * 0.8);
+                    scores.put(app.packageName, score);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        final String[] fallbackOrder = new String[]{
+                "com.whatsapp", "com.facebook.katana", "com.apple.android.music", "com.spotify.music",
+                "com.google.android.youtube", "com.android.chrome", "com.google.android.apps.photos", "com.android.settings"
+        };
+
+        List<AppInfo> candidates = new ArrayList<>();
+        List<String> addedPkgs = new ArrayList<>();
+        List<AppInfo> sorted = new ArrayList<>(appList);
+        Collections.sort(sorted, new Comparator<AppInfo>() {
+            @Override
+            public int compare(AppInfo a, AppInfo b) {
+                Double sa = scores.get(a.packageName);
+                Double sb = scores.get(b.packageName);
+                double va = sa != null ? sa : 0.0;
+                double vb = sb != null ? sb : 0.0;
+                if (vb != va) return Double.compare(vb, va);
+                return a.label.compareToIgnoreCase(b.label);
+            }
+        });
+        for (AppInfo a : sorted) {
+            if (scores.containsKey(a.packageName) && !addedPkgs.contains(a.packageName)) {
+                candidates.add(a);
+                addedPkgs.add(a.packageName);
+                if (candidates.size() >= 4) break;
+            }
+        }
+        if (candidates.size() < 4) {
+            for (String pkg : fallbackOrder) {
+                AppInfo match = findAppByPkg(pkg);
+                if (match != null && !addedPkgs.contains(match.packageName)) {
+                    candidates.add(match);
+                    addedPkgs.add(match.packageName);
+                    if (candidates.size() >= 4) break;
+                }
+            }
+        }
+        for (AppInfo a : appList) {
+            if (candidates.size() >= 4) break;
+            if (!addedPkgs.contains(a.packageName)) {
+                candidates.add(a);
+                addedPkgs.add(a.packageName);
+            }
+        }
+
+        boolean isNight = LauncherTheme.isNightMode(this);
+        float density = getResources().getDisplayMetrics().density;
+        int iconPx = Math.round(60f * density);
+        int padPx = Math.round(4f * density);
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (final AppInfo app : candidates) {
+            final View slotView = inflater.inflate(R.layout.item_app_grid, llDrawerPredictions, false);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            slotView.setLayoutParams(lp);
+            slotView.setPadding(padPx, padPx, padPx, padPx);
+
+            final ImageView iv = slotView.findViewById(R.id.iv_app_icon);
+            TextView tv = slotView.findViewById(R.id.tv_app_label);
+            if (iv != null) {
+                ViewGroup.LayoutParams ilp = iv.getLayoutParams();
+                if (ilp != null) {
+                    ilp.width = iconPx;
+                    ilp.height = iconPx;
+                    iv.setLayoutParams(ilp);
+                }
+                if (app.icon != null) iv.setImageDrawable(app.icon);
+                UiMotion.attachIconTouchSpring(slotView, iv);
+            }
+            if (tv != null) {
+                tv.setText(app.label);
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+                tv.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+                tv.setTextColor(LauncherTheme.textPrimary(isNight));
+            }
+            slotView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!isGestureTapEligible()) return;
+                    launchApp(app, iv != null ? iv : slotView);
+                }
+            });
+            slotView.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    if (!canStartGestureDragHold()) return false;
+                    scheduleDeferredDragHold(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (drawerController != null && drawerController.isVisibleOrAnimating() && !drawerController.isDragging()) {
+                                startDragFromDrawer(slotView, app);
+                            }
+                        }
+                    }, LONG_PRESS_DRAWER_HOLD_MS);
+                    return true;
+                }
+            });
+            llDrawerPredictions.addView(slotView);
+        }
+
+        if (llDrawerHeaderOverlay != null) {
+            llDrawerHeaderOverlay.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (llDrawerHeaderOverlay != null && llDrawerHeaderOverlay.getHeight() > 0) {
+                        drawerHeaderHeightPx = llDrawerHeaderOverlay.getHeight();
+                    }
+                    updateDrawerGridPadding();
+                    syncDrawerHeaderScroll();
+                }
+            });
+        }
     }
 
     private void launchApp(AppInfo app) {
+        launchApp(app, null);
+    }
+
+    private void launchApp(final AppInfo app, final View sourceView) {
+        if (app == null) return;
+        if (launchTransitionView != null && launchTransitionView.isAnimating()) {
+            return;
+        }
+        final Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        intent.setComponent(new ComponentName(app.packageName, app.activityName));
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+
+        final boolean fromDrawer = (drawerController != null && drawerController.isVisibleOrAnimating());
+        pendingDrawerCollapseOnStop = fromDrawer;
+
+        Long prevLaunchTime = recentlyLaunchedPackages.get(app.packageName);
+        final boolean isWarmLaunch = (prevLaunchTime != null && (SystemClock.uptimeMillis() - prevLaunchTime) < WARM_LAUNCH_WINDOW_MS);
+
+        Rect startBounds = UiMotion.measureScreenBounds(sourceView);
+        if (startBounds != null && launchTransitionView != null) {
+            View bgTarget = fromDrawer ? appDrawer : homeScreen;
+            Drawable iconDrawable = (app.icon != null)
+                    ? app.icon
+                    : ((sourceView instanceof ImageView) ? ((ImageView) sourceView).getDrawable() : null);
+            ComponentName launchComponent = new ComponentName(app.packageName, app.activityName);
+
+            launchTransitionView.playLaunchExpansion(startBounds, launchComponent, iconDrawable, app.splashAccentColor, sourceView, bgTarget, isWarmLaunch, new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        UiMotion.launchWithClipReveal(MainActivity.this, intent, sourceView, true);
+                        recentlyLaunchedPackages.put(app.packageName, SystemClock.uptimeMillis());
+                        mainHandler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                recordAppLaunchForPredictions(app.packageName);
+                                refreshDrawerPredictions();
+                            }
+                        }, 620L);
+                    } catch (Exception e) {
+                        pendingDrawerCollapseOnStop = false;
+                        pendingFolderLaunchPopup = null;
+                        if (launchTransitionView != null) {
+                            launchTransitionView.resetImmediately();
+                        }
+                        Toast.makeText(MainActivity.this, "Could not open " + app.label, Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+            mainHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (launchTransitionView != null && launchTransitionView.getVisibility() == View.VISIBLE && hasWindowFocus()) {
+                        launchTransitionView.resetImmediately();
+                        pendingDrawerCollapseOnStop = false;
+                    }
+                }
+            }, 900L);
+            return;
+        }
+
         try {
-            Intent intent = new Intent(Intent.ACTION_MAIN);
-            intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            intent.setComponent(new ComponentName(app.packageName, app.activityName));
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-            startActivity(intent);
-            closeAppDrawer();
+            UiMotion.launchWithClipReveal(this, intent, sourceView);
+            recentlyLaunchedPackages.put(app.packageName, SystemClock.uptimeMillis());
+            recordAppLaunchForPredictions(app.packageName);
+            refreshDrawerPredictions();
         } catch (Exception e) {
+            pendingDrawerCollapseOnStop = false;
+            pendingFolderLaunchPopup = null;
             Toast.makeText(this, "Could not open " + app.label, Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void loadInstalledApps() {
-        new Thread(new Runnable() {
+    private void registerPackageListeners() {
+        if (!isPackageReceiverRegistered) {
+            try {
+                IntentFilter filter = new IntentFilter();
+                filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+                filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+                filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+                filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+                filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
+                filter.addDataScheme("package");
+                if (Build.VERSION.SDK_INT >= 33) {
+                    // Context.RECEIVER_EXPORTED = 2 (compiled against API 30 jar)
+                    Method regMethod = Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class);
+                    regMethod.invoke(this, packageChangeReceiver, filter, 2);
+                } else {
+                    registerReceiver(packageChangeReceiver, filter);
+                }
+                isPackageReceiverRegistered = true;
+            } catch (Throwable t) {
+                try {
+                    IntentFilter fallback = new IntentFilter();
+                    fallback.addAction(Intent.ACTION_PACKAGE_ADDED);
+                    fallback.addAction(Intent.ACTION_PACKAGE_REMOVED);
+                    fallback.addAction(Intent.ACTION_PACKAGE_CHANGED);
+                    fallback.addAction(Intent.ACTION_PACKAGE_REPLACED);
+                    fallback.addDataScheme("package");
+                    registerReceiver(packageChangeReceiver, fallback);
+                    isPackageReceiverRegistered = true;
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        if (launcherAppsCallback == null) {
+            try {
+                launcherAppsService = (LauncherApps) getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                if (launcherAppsService != null) {
+                    launcherAppsCallback = new LauncherApps.Callback() {
+                        @Override
+                        public void onPackageRemoved(String packageName, UserHandle user) {
+                            scheduleInstalledAppsRefresh(false, 160L);
+                        }
+
+                        @Override
+                        public void onPackageAdded(String packageName, UserHandle user) {
+                            scheduleInstalledAppsRefresh(false, 160L);
+                        }
+
+                        @Override
+                        public void onPackageChanged(String packageName, UserHandle user) {
+                            scheduleInstalledAppsRefresh(false, 160L);
+                        }
+
+                        @Override
+                        public void onPackagesAvailable(String[] packageNames, UserHandle user, boolean replacing) {
+                            scheduleInstalledAppsRefresh(false, 160L);
+                        }
+
+                        @Override
+                        public void onPackagesUnavailable(String[] packageNames, UserHandle user, boolean replacing) {
+                            if (!replacing) {
+                                scheduleInstalledAppsRefresh(false, 160L);
+                            }
+                        }
+
+                        @Override
+                        public void onPackagesSuspended(String[] packageNames, UserHandle user) {
+                            scheduleInstalledAppsRefresh(false, 160L);
+                        }
+
+                        @Override
+                        public void onPackagesUnsuspended(String[] packageNames, UserHandle user) {
+                            scheduleInstalledAppsRefresh(false, 160L);
+                        }
+                    };
+                    launcherAppsService.registerCallback(launcherAppsCallback, mainHandler);
+                }
+            } catch (Throwable t) {
+                Log.w("PixelLauncher", "LauncherApps callback registration failed: " + t.getMessage());
+            }
+        }
+    }
+
+    private void unregisterPackageListeners() {
+        if (pendingAppRefreshRunnable != null) {
+            mainHandler.removeCallbacks(pendingAppRefreshRunnable);
+            pendingAppRefreshRunnable = null;
+        }
+        if (isPackageReceiverRegistered) {
+            try {
+                unregisterReceiver(packageChangeReceiver);
+            } catch (Throwable ignored) {}
+            isPackageReceiverRegistered = false;
+        }
+        if (launcherAppsService != null && launcherAppsCallback != null) {
+            try {
+                launcherAppsService.unregisterCallback(launcherAppsCallback);
+            } catch (Throwable ignored) {}
+            launcherAppsCallback = null;
+        }
+    }
+
+    private void scheduleInstalledAppsRefresh(final boolean onlyIfChanged, long delayMs) {
+        if (pendingAppRefreshRunnable != null) {
+            mainHandler.removeCallbacks(pendingAppRefreshRunnable);
+        }
+        pendingAppRefreshRunnable = new Runnable() {
             @Override
             public void run() {
+                pendingAppRefreshRunnable = null;
+                loadInstalledApps(onlyIfChanged);
+            }
+        };
+        mainHandler.postDelayed(pendingAppRefreshRunnable, Math.max(0L, delayMs));
+    }
+
+    private void loadInstalledApps(final boolean onlyIfChanged) {
+        final int requestSeq = appLoadSeq.incrementAndGet();
+        appLoaderExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (requestSeq != appLoadSeq.get()) return;
+
                 PackageManager pm = getPackageManager();
-                Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
-                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                LauncherApps la = launcherAppsService;
+                if (la == null) {
+                    try {
+                        la = (LauncherApps) getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                    } catch (Throwable ignored) {}
+                }
 
-                List<ResolveInfo> activities = pm.queryIntentActivities(mainIntent, 0);
-                final List<AppInfo> apps = new ArrayList<>();
+                // Collect launchable components from both LauncherApps and PackageManager
+                final class CandidateApp {
+                    final String pkg;
+                    final String act;
+                    final String sourceDir;
+                    final LauncherActivityInfo laInfo;
+                    final ResolveInfo riInfo;
 
-                for (ResolveInfo ri : activities) {
-                    if (ri.activityInfo.packageName.equals(getPackageName())) {
-                        continue;
+                    CandidateApp(String pkg, String act, String sourceDir, LauncherActivityInfo laInfo, ResolveInfo riInfo) {
+                        this.pkg = pkg;
+                        this.act = act;
+                        this.sourceDir = sourceDir != null ? sourceDir : "";
+                        this.laInfo = laInfo;
+                        this.riInfo = riInfo;
                     }
-                    String label = ri.loadLabel(pm).toString();
-                    Drawable icon = IconNormalizer.normalizeToPixelCircle(MainActivity.this, ri.loadIcon(pm));
-                    String packageName = ri.activityInfo.packageName;
-                    String activityName = ri.activityInfo.name;
-                    apps.add(new AppInfo(label, packageName, activityName, icon));
+                }
+
+                Map<String, CandidateApp> unique = new LinkedHashMap<>();
+                String selfPkg = getPackageName();
+                UserHandle primaryUser = Process.myUserHandle();
+
+                if (la != null) {
+                    try {
+                        List<LauncherActivityInfo> laList = la.getActivityList(null, primaryUser);
+                        if (laList != null) {
+                            for (LauncherActivityInfo info : laList) {
+                                ComponentName cn = info.getComponentName();
+                                if (cn == null) continue;
+                                String pkg = cn.getPackageName();
+                                if (selfPkg.equals(pkg)) continue;
+                                String act = cn.getClassName();
+                                ApplicationInfo ai = info.getApplicationInfo();
+                                String srcDir = (ai != null && ai.sourceDir != null) ? ai.sourceDir : "";
+                                unique.put(pkg + "/" + act, new CandidateApp(pkg, act, srcDir, info, null));
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+
+                try {
+                    Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+                    mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                    List<ResolveInfo> activities = pm.queryIntentActivities(mainIntent, 0);
+                    if (activities != null) {
+                        for (ResolveInfo ri : activities) {
+                            if (ri.activityInfo == null) continue;
+                            String pkg = ri.activityInfo.packageName;
+                            if (selfPkg.equals(pkg)) continue;
+                            String act = ri.activityInfo.name;
+                            String compKey = pkg + "/" + act;
+                            if (!unique.containsKey(compKey)) {
+                                ApplicationInfo ai = ri.activityInfo.applicationInfo;
+                                String srcDir = (ai != null && ai.sourceDir != null) ? ai.sourceDir : "";
+                                unique.put(compKey, new CandidateApp(pkg, act, srcDir, null, ri));
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {}
+
+                List<String> sigKeys = new ArrayList<>(unique.size());
+                for (CandidateApp c : unique.values()) {
+                    sigKeys.add(c.pkg + "/" + c.act + "|" + c.sourceDir);
+                }
+                Collections.sort(sigKeys);
+                StringBuilder sigBuilder = new StringBuilder(sigKeys.size() * 48);
+                for (String s : sigKeys) {
+                    sigBuilder.append(s).append('\n');
+                }
+                final String signature = sigBuilder.toString();
+
+                if (onlyIfChanged && hasLoadedInitialWorkspace && signature.equals(loadedAppsSignature)) {
+                    return;
+                }
+
+                final List<AppInfo> apps = new ArrayList<>(unique.size());
+                for (CandidateApp c : unique.values()) {
+                    if (requestSeq != appLoadSeq.get()) return;
+                    try {
+                        String label = null;
+                        if (c.laInfo != null) {
+                            CharSequence cs = c.laInfo.getLabel();
+                            if (cs != null) label = cs.toString();
+                        } else if (c.riInfo != null) {
+                            CharSequence cs = c.riInfo.loadLabel(pm);
+                            if (cs != null) label = cs.toString();
+                        }
+                        if (label == null || label.isEmpty()) label = c.pkg;
+
+                        String cacheKey = c.pkg + "/" + c.act + "|" + c.sourceDir + "|" + label;
+                        AppInfo cached = appInfoCache.get(cacheKey);
+                        if (cached != null) {
+                            apps.add(cached);
+                            continue;
+                        }
+
+                        Drawable rawIcon = null;
+                        if (c.laInfo != null) {
+                            rawIcon = c.laInfo.getBadgedIcon(0);
+                        } else if (c.riInfo != null) {
+                            rawIcon = c.riInfo.loadIcon(pm);
+                        }
+                        int splashTint = IconNormalizer.extractSplashTintColor(rawIcon);
+                        Drawable normIcon = IconNormalizer.normalizeToPixelCircle(MainActivity.this, rawIcon);
+                        AppInfo entry = new AppInfo(label, c.pkg, c.act, normIcon, splashTint);
+                        appInfoCache.put(cacheKey, entry);
+                        apps.add(entry);
+                    } catch (Throwable ignored) {}
                 }
 
                 Collections.sort(apps);
@@ -4921,21 +7436,137 @@ public class MainActivity extends Activity {
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (requestSeq != appLoadSeq.get()) return;
+                        loadedAppsSignature = signature;
                         appList.clear();
                         appList.addAll(apps);
                         if (appAdapter != null) {
                             appAdapter.updateList(apps);
+                            if (etDrawerSearch != null && etDrawerSearch.length() > 0) {
+                                handleDrawerSearchQueryChanged(etDrawerSearch.getText());
+                            }
                         }
-                        loadPages();
-                        loadDockApps();
-                        renderDock();
+                        refreshDrawerPredictions();
+                        if (drawerScrollbar != null) {
+                            drawerScrollbar.notifyListChanged();
+                        }
+                        if (!hasLoadedInitialWorkspace) {
+                            hasLoadedInitialWorkspace = true;
+                            loadPages();
+                            loadDockApps();
+                            renderDock();
+                            int rasterPx = Math.max(144, Math.round(108f * getResources().getDisplayMetrics().density));
+                            java.util.List<AppInfo> warmupApps = new java.util.ArrayList<>(dockApps);
+                            if (!pages.isEmpty() && pages.get(0) != null) {
+                                for (LauncherItem it : pages.get(0)) {
+                                    if (it != null && it.appInfo != null) {
+                                        warmupApps.add(it.appInfo);
+                                    }
+                                }
+                            }
+                            IconNormalizer.prewarmLaunchLayers(MainActivity.this, warmupApps, rasterPx);
+                        } else {
+                            reconcileWorkspaceWithApps(apps);
+                        }
                     }
                 });
             }
-        }).start();
+        });
+    }
+
+    private boolean isPackageStillInstalled(PackageManager pm, String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        try {
+            pm.getPackageInfo(pkg, 0);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void reconcileWorkspaceWithApps(List<AppInfo> freshApps) {
+        if (isDragActive || isWindowModeActive) {
+            scheduleInstalledAppsRefresh(false, 400L);
+            return;
+        }
+        Map<String, AppInfo> byComp = new HashMap<>(freshApps.size());
+        Map<String, AppInfo> byPkg = new HashMap<>(freshApps.size());
+        for (AppInfo a : freshApps) {
+            byComp.put(a.packageName + "/" + a.activityName, a);
+            if (!byPkg.containsKey(a.packageName)) {
+                byPkg.put(a.packageName, a);
+            }
+        }
+
+        PackageManager pm = getPackageManager();
+        boolean pagesRemoved = false;
+        int prevPageCount = pages.size();
+
+        for (int p = 0; p < pages.size(); p++) {
+            List<LauncherItem> page = pages.get(p);
+            for (int i = 0; i < page.size(); i++) {
+                LauncherItem item = page.get(i);
+                if (item == null) continue;
+                if (item.type == LauncherItem.TYPE_APP && item.appInfo != null) {
+                    AppInfo fresh = byComp.get(item.appInfo.packageName + "/" + item.appInfo.activityName);
+                    if (fresh == null) fresh = byPkg.get(item.appInfo.packageName);
+                    if (fresh != null) {
+                        page.set(i, new LauncherItem(fresh));
+                    } else if (!isPackageStillInstalled(pm, item.appInfo.packageName)) {
+                        page.set(i, null);
+                        pagesRemoved = true;
+                    }
+                } else if (item.type == LauncherItem.TYPE_FOLDER && item.folderInfo != null) {
+                    for (int aIdx = item.folderInfo.apps.size() - 1; aIdx >= 0; aIdx--) {
+                        AppInfo sub = item.folderInfo.apps.get(aIdx);
+                        if (sub == null) continue;
+                        AppInfo fresh = byComp.get(sub.packageName + "/" + sub.activityName);
+                        if (fresh == null) fresh = byPkg.get(sub.packageName);
+                        if (fresh != null) {
+                            item.folderInfo.apps.set(aIdx, fresh);
+                        } else if (!isPackageStillInstalled(pm, sub.packageName)) {
+                            item.folderInfo.apps.remove(aIdx);
+                            pagesRemoved = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        cleanupFoldersOnAllPages();
+        if (pagesRemoved) {
+            pruneEmptyTrailingPages();
+            savePages();
+        }
+        if (pages.size() != prevPageCount) {
+            setupPagesLayout();
+        } else {
+            for (HomeItemAdapter adapter : pageAdapters) {
+                adapter.notifyDataSetChanged();
+            }
+        }
+
+        boolean dockRemoved = false;
+        for (int d = 0; d < dockApps.size(); d++) {
+            AppInfo dApp = dockApps.get(d);
+            if (dApp == null) continue;
+            AppInfo fresh = byComp.get(dApp.packageName + "/" + dApp.activityName);
+            if (fresh == null) fresh = byPkg.get(dApp.packageName);
+            if (fresh != null) {
+                dockApps.set(d, fresh);
+            } else if (!isPackageStillInstalled(pm, dApp.packageName)) {
+                dockApps.set(d, null);
+                dockRemoved = true;
+            }
+        }
+        if (dockRemoved) {
+            saveDockApps();
+        }
+        renderDock();
     }
 
     private void openAppDrawer() {
+        syncDrawerHeaderScroll();
         if (drawerController != null) {
             drawerController.open();
         }
@@ -4975,23 +7606,181 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override
-    public void onBackPressed() {
+    private void registerPredictiveBackCallback() {
+        if (Build.VERSION.SDK_INT < 33 || onBackInvokedCallbackProxy != null) return;
+        try {
+            Class<?> dispatcherCls = Class.forName("android.window.OnBackInvokedDispatcher");
+            Class<?> callbackCls = Class.forName("android.window.OnBackInvokedCallback");
+            Method getDispatcher = Activity.class.getMethod("getOnBackInvokedDispatcher");
+            Object dispatcher = getDispatcher.invoke(this);
+            if (dispatcher == null) return;
+
+            final Object proxy = Proxy.newProxyInstance(
+                    callbackCls.getClassLoader(),
+                    new Class<?>[]{callbackCls},
+                    new InvocationHandler() {
+                        @Override
+                        public Object invoke(Object p, Method method, Object[] args) {
+                            String name = method.getName();
+                            if ("onBackInvoked".equals(name)) {
+                                if (Looper.myLooper() == Looper.getMainLooper()) {
+                                    handleBackNavigation();
+                                } else {
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            handleBackNavigation();
+                                        }
+                                    });
+                                }
+                                return null;
+                            }
+                            if ("equals".equals(name)) {
+                                return p == (args != null && args.length > 0 ? args[0] : null);
+                            }
+                            if ("hashCode".equals(name)) {
+                                return System.identityHashCode(p);
+                            }
+                            if ("toString".equals(name)) {
+                                return "LWLauncherBackCallback";
+                            }
+                            return null;
+                        }
+                    }
+            );
+            Method registerMethod = dispatcherCls.getMethod("registerOnBackInvokedCallback", int.class, callbackCls);
+            registerMethod.invoke(dispatcher, 0, proxy);
+            onBackInvokedCallbackProxy = proxy;
+        } catch (Throwable t) {
+            Log.w("PixelLauncher", "Failed to register OnBackInvokedCallback: " + t.getMessage());
+        }
+    }
+
+    private void unregisterPredictiveBackCallback() {
+        if (Build.VERSION.SDK_INT < 33 || onBackInvokedCallbackProxy == null) return;
+        try {
+            Class<?> dispatcherCls = Class.forName("android.window.OnBackInvokedDispatcher");
+            Class<?> callbackCls = Class.forName("android.window.OnBackInvokedCallback");
+            Method getDispatcher = Activity.class.getMethod("getOnBackInvokedDispatcher");
+            Object dispatcher = getDispatcher.invoke(this);
+            if (dispatcher != null) {
+                Method unregisterMethod = dispatcherCls.getMethod("unregisterOnBackInvokedCallback", callbackCls);
+                unregisterMethod.invoke(dispatcher, onBackInvokedCallbackProxy);
+            }
+        } catch (Throwable ignored) {}
+        onBackInvokedCallbackProxy = null;
+    }
+
+    private void handleBackNavigation() {
+        if (isDragActive) {
+            if (!dragMoved) {
+                cancelUnmovedDrag();
+            } else {
+                endDrag(dragStartX, dragStartY);
+            }
+            return;
+        }
         if (customizationPanelOverlay != null && customizationPanelOverlay.getVisibility() == View.VISIBLE) {
             hideCustomizationPanel();
             return;
         }
         if (drawerController != null && drawerController.isVisibleOrAnimating()) {
+            if (etDrawerSearch != null && (etDrawerSearch.length() > 0 || etDrawerSearch.hasFocus())) {
+                hideKeyboard(etDrawerSearch);
+                etDrawerSearch.clearFocus();
+                if (etDrawerSearch.length() > 0) {
+                    etDrawerSearch.setText("");
+                }
+                return;
+            }
             closeAppDrawer();
+            return;
         }
+        if (currentPage > 0) {
+            scrollToPage(0);
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        handleBackNavigation();
+    }
+
+    private void applySystemTheme(Configuration config) {
+        boolean isNight = LauncherTheme.isNightMode(config);
+        LauncherTheme.applyAppDrawerTheme(
+                this,
+                isNight,
+                appDrawer,
+                drawerDragHandle,
+                drawerSearchBar,
+                ivDrawerSearchIcon,
+                etDrawerSearch,
+                btnCloseDrawer,
+                drawerScrollbar
+        );
+        LauncherTheme.applyHomeFallbackSearchTheme(this, isNight, findViewById(R.id.pixel_search_bar));
+        LauncherTheme.applyCustomizationPanelTheme(this, isNight, panelCustomizationCard);
+        if (btnDrawerMic != null) btnDrawerMic.clearColorFilter();
+        if (btnDrawerLens != null) btnDrawerLens.clearColorFilter();
+        if (tvDrawerAllAppsHeader != null) tvDrawerAllAppsHeader.setTextColor(LauncherTheme.textPrimary(isNight));
+        if (llDrawerPredictions != null) {
+            int predColor = LauncherTheme.textPrimary(isNight);
+            for (int i = 0; i < llDrawerPredictions.getChildCount(); i++) {
+                View slot = llDrawerPredictions.getChildAt(i);
+                TextView tv = slot != null ? (TextView) slot.findViewById(R.id.tv_app_label) : null;
+                if (tv != null) tv.setTextColor(predColor);
+            }
+        }
+        if (svDrawerSearchResults != null
+                && svDrawerSearchResults.getVisibility() == View.VISIBLE
+                && !lastDrawerSearchQuery.isEmpty()) {
+            List<AppInfo> matches = AppAdapter.rankMatches(appList, lastDrawerSearchQuery);
+            String raw = etDrawerSearch != null && etDrawerSearch.getText() != null
+                    ? etDrawerSearch.getText().toString()
+                    : lastDrawerSearchQuery;
+            updateDrawerTypeaheadHint(raw, matches);
+            renderDrawerSearchResults(lastDrawerSearchQuery, matches, lastDrawerSuggestions);
+        }
+        if (appAdapter != null) {
+            appAdapter.notifyDataSetChanged();
+        }
+        LauncherTheme.updateSystemBarsForDrawer(getWindow(), isNight, isDrawerVisiblyOpenForBars);
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applySystemTheme(newConfig);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        pendingDrawerCollapseOnStop = false;
+        DisplayRefreshHelper.refreshCapabilities(this);
+        DisplayRefreshHelper.applyWindowRefreshPreference(this, false);
+        applyRefreshAdaptedScrollPhysics();
+        if (pendingFolderLaunchPopup != null) {
+            PopupWindow p = pendingFolderLaunchPopup;
+            pendingFolderLaunchPopup = null;
+            try {
+                if (p.isShowing()) p.dismiss();
+            } catch (Exception ignored) {}
+        }
+        if (launchTransitionView != null) {
+            launchTransitionView.resetImmediately();
+        }
+        applySystemTheme(getResources().getConfiguration());
         setupAtAGlance();
+        if (liveWeatherController != null) {
+            liveWeatherController.refreshIfNeeded(!liveWeatherController.hasData());
+        }
         if (rootLayout != null) {
             rootLayout.requestApplyInsets();
+        }
+        if (hasLoadedInitialWorkspace) {
+            scheduleInstalledAppsRefresh(true, 100L);
         }
     }
 
@@ -5008,6 +7797,25 @@ public class MainActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
+        isPrimaryPointerDown = false;
+        cancelPendingLongPressRunnables();
+        if (isDragActive && !dragMoved) {
+            cancelUnmovedDrag();
+        }
+        if (pendingFolderLaunchPopup != null) {
+            PopupWindow p = pendingFolderLaunchPopup;
+            pendingFolderLaunchPopup = null;
+            try {
+                if (p.isShowing()) p.dismiss();
+            } catch (Exception ignored) {}
+        }
+        if (pendingDrawerCollapseOnStop && drawerController != null) {
+            pendingDrawerCollapseOnStop = false;
+            drawerController.collapseImmediately();
+        }
+        if (launchTransitionView != null) {
+            launchTransitionView.resetImmediately();
+        }
         if (appWidgetHost != null) {
             try {
                 appWidgetHost.stopListening();
@@ -5017,6 +7825,24 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        unregisterPredictiveBackCallback();
+        unregisterPackageListeners();
+        DisplayRefreshHelper.unregisterDisplayListener(this, displayListener);
+        displayListener = null;
+        if (pendingWebSuggestRunnable != null) {
+            mainHandler.removeCallbacks(pendingWebSuggestRunnable);
+            pendingWebSuggestRunnable = null;
+        }
+        if (drawerSearchMarginAnimator != null) {
+            drawerSearchMarginAnimator.cancel();
+            drawerSearchMarginAnimator = null;
+        }
+        if (liveWeatherController != null) {
+            liveWeatherController.shutdown();
+        }
+        try {
+            appLoaderExecutor.shutdownNow();
+        } catch (Throwable ignored) {}
         super.onDestroy();
         if (isBatteryReceiverRegistered) {
             try {

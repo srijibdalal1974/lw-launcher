@@ -11,6 +11,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.animation.OvershootInterpolator;
 import android.widget.HorizontalScrollView;
 
 /**
@@ -47,6 +48,8 @@ public class SmoothHomePager extends HorizontalScrollView {
     private int startPage;
     private boolean isPaging = false;
     private boolean dragBlocked = false;
+    private float overscrollPx = 0f;
+    private float maxOverscrollPx = 42f;
 
     private VelocityTracker velocityTracker;
     private ValueAnimator snapAnimator;
@@ -73,8 +76,51 @@ public class SmoothHomePager extends HorizontalScrollView {
         touchSlop = vc.getScaledTouchSlop();
         minFlingVelocity = Math.max(vc.getScaledMinimumFlingVelocity() * 2, 220);
         maxFlingVelocity = vc.getScaledMaximumFlingVelocity();
+        maxOverscrollPx = 26f * context.getResources().getDisplayMetrics().density;
         setHorizontalScrollBarEnabled(false);
         setOverScrollMode(OVER_SCROLL_NEVER);
+    }
+
+    private void applyOverscrollTranslation(float tx) {
+        overscrollPx = tx;
+        if (getChildCount() > 0) {
+            getChildAt(0).setTranslationX(tx);
+        }
+    }
+
+    private void releaseOverscrollSpring() {
+        if (getChildCount() == 0) {
+            overscrollPx = 0f;
+            return;
+        }
+        final View child = getChildAt(0);
+        final float startTx = child.getTranslationX();
+        if (Math.abs(overscrollPx) > 0.5f || Math.abs(startTx) > 0.5f) {
+            overscrollPx = 0f;
+            cancelSnapAnimation();
+            final DisplayRefreshHelper.FramePacer pacer = new DisplayRefreshHelper.FramePacer();
+            ValueAnimator va = ValueAnimator.ofFloat(startTx, 0f);
+            va.setDuration(DisplayRefreshHelper.scaleDurationMs(220));
+            va.setInterpolator(new OvershootInterpolator(DisplayRefreshHelper.scaleOvershootTension(1.30f)));
+            va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator animation) {
+                    if (!pacer.shouldRender(animation)) return;
+                    child.setTranslationX((float) animation.getAnimatedValue());
+                }
+            });
+            va.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    child.setTranslationX(0f);
+                }
+            });
+            snapAnimator = va;
+            va.start();
+        } else {
+            overscrollPx = 0f;
+            child.setTranslationX(0f);
+        }
     }
 
     public void setOnPageSnapListener(OnPageSnapListener listener) {
@@ -196,13 +242,17 @@ public class SmoothHomePager extends HorizontalScrollView {
         int distance = Math.abs(targetX - currentX);
         int duration = computeScrollDuration(distance, pageW, Math.abs(velocityPxPerSec));
 
+        DisplayRefreshHelper.requestInteractiveBoost(getContext(), true);
+        DisplayRefreshHelper.setFrameContentVelocity(this, Math.abs(velocityPxPerSec) > 10f ? velocityPxPerSec : distance * 4f);
         setPagesHardwareLayer(true);
+        final DisplayRefreshHelper.FramePacer pacer = new DisplayRefreshHelper.FramePacer();
         snapAnimator = ValueAnimator.ofInt(currentX, targetX);
         snapAnimator.setDuration(duration);
         snapAnimator.setInterpolator(QUINTIC_EASE_OUT);
         snapAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
+                if (!pacer.shouldRender(animation)) return;
                 scrollTo((int) animation.getAnimatedValue(), 0);
             }
         });
@@ -211,11 +261,15 @@ public class SmoothHomePager extends HorizontalScrollView {
             public void onAnimationEnd(Animator animation) {
                 snapAnimator = null;
                 setPagesHardwareLayer(false);
+                DisplayRefreshHelper.setFrameContentVelocity(SmoothHomePager.this, 0f);
+                DisplayRefreshHelper.requestInteractiveBoost(getContext(), false);
             }
 
             @Override
             public void onAnimationCancel(Animator animation) {
                 setPagesHardwareLayer(false);
+                DisplayRefreshHelper.setFrameContentVelocity(SmoothHomePager.this, 0f);
+                DisplayRefreshHelper.requestInteractiveBoost(getContext(), false);
             }
         });
         snapAnimator.start();
@@ -232,7 +286,7 @@ public class SmoothHomePager extends HorizontalScrollView {
         } else {
             baseDuration = Math.round(160 + distanceRatio * 115);
         }
-        return Math.max(160, Math.min(280, baseDuration));
+        return DisplayRefreshHelper.scaleDurationMs(Math.max(160, Math.min(280, baseDuration)));
     }
 
     @Override
@@ -259,7 +313,7 @@ public class SmoothHomePager extends HorizontalScrollView {
                 addMovementToTracker(ev);
                 float dx = Math.abs(ev.getX() - downX);
                 float dy = Math.abs(ev.getY() - downY);
-                if (dx > touchSlop && dx > dy * 1.05f) {
+                if (dx > touchSlop && dx > dy * 0.85f) {
                     isPaging = true;
                     lastMoveX = ev.getX();
                     setPagesHardwareLayer(true);
@@ -272,9 +326,16 @@ public class SmoothHomePager extends HorizontalScrollView {
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                float endDx = Math.abs(ev.getX() - downX);
+                float endDy = Math.abs(ev.getY() - downY);
+                boolean movedOnEnd = (action == MotionEvent.ACTION_UP)
+                        && (Math.hypot(endDx, endDy) > touchSlop);
                 isPaging = false;
                 recycleVelocityTracker();
                 setPagesHardwareLayer(false);
+                if (movedOnEnd) {
+                    return true;
+                }
                 break;
         }
         return false;
@@ -320,8 +381,31 @@ public class SmoothHomePager extends HorizontalScrollView {
                     lastMoveX = x;
                     int pageW = getResolvedPageWidth();
                     int maxScrollX = Math.max(0, (getResolvedPageCount() - 1) * pageW);
-                    int nextX = Math.max(0, Math.min(maxScrollX, Math.round(getScrollX() + deltaX)));
-                    scrollTo(nextX, 0);
+                    int curX = getScrollX();
+
+                    if (overscrollPx > 0.5f && deltaX > 0) {
+                        float nextOver = Math.max(0f, overscrollPx - deltaX);
+                        applyOverscrollTranslation(nextOver);
+                        return true;
+                    } else if (overscrollPx < -0.5f && deltaX < 0) {
+                        float nextOver = Math.min(0f, overscrollPx - deltaX);
+                        applyOverscrollTranslation(nextOver);
+                        return true;
+                    }
+
+                    int rawNextX = Math.round(curX + deltaX);
+                    if (rawNextX < 0) {
+                        scrollTo(0, 0);
+                        float over = Math.min(maxOverscrollPx, overscrollPx + (-rawNextX) * 0.28f);
+                        applyOverscrollTranslation(over);
+                    } else if (rawNextX > maxScrollX) {
+                        scrollTo(maxScrollX, 0);
+                        float over = Math.max(-maxOverscrollPx, overscrollPx - (rawNextX - maxScrollX) * 0.28f);
+                        applyOverscrollTranslation(over);
+                    } else {
+                        if (overscrollPx != 0f) applyOverscrollTranslation(0f);
+                        scrollTo(rawNextX, 0);
+                    }
                     return true;
                 }
                 break;
@@ -334,10 +418,12 @@ public class SmoothHomePager extends HorizontalScrollView {
                     velocityTracker.computeCurrentVelocity(1000, maxFlingVelocity);
                     vx = velocityTracker.getXVelocity();
                 }
+                boolean hadOverscroll = Math.abs(overscrollPx) > 0.5f;
+                releaseOverscrollSpring();
                 boolean wasPaging = isPaging || getScrollX() != startPage * getResolvedPageWidth();
                 isPaging = false;
                 recycleVelocityTracker();
-                if (wasPaging) {
+                if (wasPaging && !hadOverscroll) {
                     int targetPage = resolveTargetPage(vx);
                     if (onPageSnapListener != null) {
                         onPageSnapListener.onSnapToPage(targetPage, vx);
@@ -347,6 +433,7 @@ public class SmoothHomePager extends HorizontalScrollView {
                     return true;
                 }
                 setPagesHardwareLayer(false);
+                if (hadOverscroll) return true;
                 break;
         }
         return true;

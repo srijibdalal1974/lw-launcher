@@ -99,14 +99,20 @@ public class HomeItemAdapter extends BaseAdapter {
         int iconSize;
         float textSize;
         if (gridColumns == 4) {
-            iconSize = (int) (50 * density);
-            textSize = 12.0f;
+            iconSize = Math.round(60 * density);
+            textSize = 12.5f;
         } else if (gridColumns == 5) {
-            iconSize = (int) (50 * density);
-            textSize = 11.0f;
+            iconSize = Math.round(54 * density);
+            textSize = 11.5f;
         } else {
-            iconSize = (int) (34 * density);
+            iconSize = Math.round(36 * density);
             textSize = 8.5f;
+        }
+        if (cellHeight > 0 && gridColumns <= 5) {
+            int maxIcon = Math.round(cellHeight * 0.66f);
+            if (maxIcon > 0 && iconSize > maxIcon) {
+                iconSize = maxIcon;
+            }
         }
 
         ViewGroup.LayoutParams iconLp = holder.ivIcon.getLayoutParams();
@@ -121,14 +127,19 @@ public class HomeItemAdapter extends BaseAdapter {
         LauncherItem item = getItem(position);
         convertView.setVisibility(View.VISIBLE);
         convertView.setAlpha(1.0f);
+        convertView.setBackground(null);
         if (item != null) {
             holder.tvLabel.setVisibility(View.VISIBLE);
             holder.ivIcon.setVisibility(View.VISIBLE);
             holder.tvLabel.setText(item.getLabel());
             holder.ivIcon.setImageDrawable(item.getIcon(context));
+            UiMotion.attachIconTouchSpring(convertView, holder.ivIcon);
         } else {
             holder.tvLabel.setVisibility(View.INVISIBLE);
             holder.ivIcon.setVisibility(View.INVISIBLE);
+            holder.ivIcon.setScaleX(1.0f);
+            holder.ivIcon.setScaleY(1.0f);
+            UiMotion.attachIconTouchSpring(convertView, null);
         }
 
         return convertView;

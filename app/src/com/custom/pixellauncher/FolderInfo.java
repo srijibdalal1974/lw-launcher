@@ -21,24 +21,28 @@ public class FolderInfo {
     }
 
     public Drawable createIcon(Context context) {
-        int size = 160;
+        int size = 192;
+        int pad = 2;
+        float center = size * 0.5f;
+        float radius = center - pad;
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
 
+        boolean isNight = LauncherTheme.isNightMode(context);
         Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bgPaint.setColor(0x40FFFFFF);
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f, bgPaint);
+        bgPaint.setColor(isNight ? 0xB824282E : 0xD8ECF1F8);
+        canvas.drawCircle(center, center, radius, bgPaint);
 
         Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         borderPaint.setStyle(Paint.Style.STROKE);
-        borderPaint.setStrokeWidth(2f);
-        borderPaint.setColor(0x50FFFFFF);
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2f, borderPaint);
+        borderPaint.setStrokeWidth(2.2f);
+        borderPaint.setColor(isNight ? 0x33FFFFFF : 0x26000000);
+        canvas.drawCircle(center, center, radius - 1.1f, borderPaint);
 
-        int miniSize = 52;
+        int miniSize = 62;
         int[][] offsets = {
-                {22, 22}, {86, 22},
-                {22, 86}, {86, 86}
+                {26, 26}, {104, 26},
+                {26, 104}, {104, 104}
         };
 
         int count = Math.min(apps.size(), 4);

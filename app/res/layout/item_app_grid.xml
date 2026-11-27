@@ -9,23 +9,23 @@
 
     <ImageView
         android:id="@+id/iv_app_icon"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
+        android:layout_width="60dp"
+        android:layout_height="60dp"
         android:scaleType="fitCenter" />
 
     <TextView
         android:id="@+id/tv_app_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
+        android:layout_marginTop="4dp"
         android:gravity="center"
         android:maxLines="1"
         android:ellipsize="end"
         android:textColor="@color/text_primary_white"
         android:textSize="12sp"
         android:fontFamily="sans-serif"
-        android:shadowColor="#B3000000"
-        android:shadowDx="1"
+        android:shadowColor="#A6000000"
+        android:shadowDx="0"
         android:shadowDy="1"
-        android:shadowRadius="3" />
+        android:shadowRadius="2.5" />
 </LinearLayout>
