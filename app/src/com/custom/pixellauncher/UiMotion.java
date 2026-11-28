@@ -6,8 +6,6 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityOptions;
 import android.content.Intent;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
@@ -24,7 +22,6 @@ import android.view.animation.Interpolator;
 import android.view.animation.OvershootInterpolator;
 import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 
 import java.lang.reflect.Method;
 
@@ -47,9 +44,8 @@ public final class UiMotion {
     private static Method cachedLpSetBlurBehindRadius = null;
     private static boolean checkedLpBlurMethod = false;
 
-    // ---- Software blur fallback for API 30 (Android 11) ----
-    private static ImageView softBlurOverlay;
-    private static Bitmap softBlurredBitmap;
+    // ---- Solid scrim fallback for API 30 (Android 11) ----
+    private static View softBlurOverlay;
     private static boolean softBlurPrepared = false;
     private static ColorDrawable windowDimDrawable;
     private static final float SOFT_BLUR_MAX_DP = 26f;
@@ -424,14 +420,15 @@ public final class UiMotion {
                 }
             } catch (Throwable ignored) {}
         } else {
-            // Software blur fallback (Android 11 / API 30)
+            // Solid scrim fallback (Android 11 / API 30) — zero GPU cost
             if (radiusDp > 0.6f) {
                 if (!softBlurPrepared) {
-                    prepareSoftwareBlur(targetView);
+                    prepareSolidScrim(targetView);
                 }
                 if (softBlurOverlay != null) {
                     float fraction = Math.min(1f, radiusDp / SOFT_BLUR_MAX_DP);
-                    softBlurOverlay.setAlpha(fraction);
+                    int alpha = (int) (fraction * 0.42f * 255);
+                    softBlurOverlay.setBackgroundColor(Color.argb(alpha, 18, 18, 22));
                     softBlurOverlay.setScaleX(targetView.getScaleX());
                     softBlurOverlay.setScaleY(targetView.getScaleY());
                     softBlurOverlay.setPivotX(targetView.getWidth() / 2f);
@@ -440,7 +437,7 @@ public final class UiMotion {
                 }
             } else {
                 if (softBlurOverlay != null) {
-                    softBlurOverlay.setAlpha(0f);
+                    softBlurOverlay.setBackgroundColor(Color.TRANSPARENT);
                     softBlurOverlay.setVisibility(View.GONE);
                 }
             }
@@ -448,106 +445,43 @@ public final class UiMotion {
     }
 
     /**
-     * Captures the target view to a small bitmap, applies a fast box blur,
-     * and creates an overlay ImageView positioned on top of the target.
-     * Used as a blur fallback on Android 11 (API 30) where RenderEffect is unavailable.
+     * Creates a lightweight solid-color scrim View as a blur stand-in on API 30.
+     * Zero bitmap allocation, zero GPU blur cost.
      */
-    private static void prepareSoftwareBlur(View target) {
+    private static void prepareSolidScrim(View target) {
         clearSoftwareBlur();
         try {
-            int w = target.getWidth();
-            int h = target.getHeight();
-            if (w <= 0 || h <= 0) return;
-
-            // Downscale by 1/12 for heavy pre-blur + small memory footprint
-            float scale = 1f / 12f;
-            int sw = Math.max(1, (int) (w * scale));
-            int sh = Math.max(1, (int) (h * scale));
-
-            Bitmap small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(small);
-            canvas.scale(scale, scale);
-            target.draw(canvas);
-
-            // Apply 2 passes of box blur for smooth Gaussian-like result
-            fastBoxBlur(small, 3);
-            fastBoxBlur(small, 3);
-
-            softBlurredBitmap = small;
-
-            // Create overlay ImageView and insert above target in z-order
             ViewGroup parent = (ViewGroup) target.getParent();
             if (parent != null) {
-                ImageView overlay = new ImageView(target.getContext());
-                overlay.setScaleType(ImageView.ScaleType.FIT_XY);
-                overlay.setImageBitmap(softBlurredBitmap);
-                overlay.setAlpha(0f);
-                overlay.setClickable(false);
-                overlay.setFocusable(false);
-                overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                overlay.setVisibility(View.GONE);
+                View scrim = new View(target.getContext());
+                scrim.setBackgroundColor(Color.TRANSPARENT);
+                scrim.setClickable(false);
+                scrim.setFocusable(false);
+                scrim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                scrim.setVisibility(View.GONE);
 
                 int idx = parent.indexOfChild(target);
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                 );
-                parent.addView(overlay, idx + 1, lp);
-
-                softBlurOverlay = overlay;
+                parent.addView(scrim, idx + 1, lp);
+                softBlurOverlay = scrim;
                 softBlurPrepared = true;
             }
         } catch (Throwable ignored) {}
     }
 
     /**
-     * Removes the software blur overlay and recycles the blurred bitmap.
-     * Call this when the drawer closes or the blur is no longer needed.
+     * Removes the scrim overlay used on API 30.
      */
     public static void clearSoftwareBlur() {
         if (softBlurOverlay != null) {
             ViewGroup parent = (ViewGroup) softBlurOverlay.getParent();
             if (parent != null) parent.removeView(softBlurOverlay);
-            softBlurOverlay.setImageBitmap(null);
             softBlurOverlay = null;
         }
-        if (softBlurredBitmap != null && !softBlurredBitmap.isRecycled()) {
-            softBlurredBitmap.recycle();
-            softBlurredBitmap = null;
-        }
         softBlurPrepared = false;
-    }
-
-    /**
-     * Fast in-place box blur on a small bitmap. O(w*h*(2r+1)^2) but trivial
-     * on a ~90x200 downscaled image. Two passes approximate a Gaussian kernel.
-     */
-    private static void fastBoxBlur(Bitmap bmp, int radius) {
-        int w = bmp.getWidth();
-        int h = bmp.getHeight();
-        int[] pix = new int[w * h];
-        bmp.getPixels(pix, 0, w, 0, 0, w, h);
-        int[] out = new int[w * h];
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int ra = 0, ga = 0, ba = 0, aa = 0, count = 0;
-                for (int dy = -radius; dy <= radius; dy++) {
-                    int ny = Math.max(0, Math.min(h - 1, y + dy));
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        int nx = Math.max(0, Math.min(w - 1, x + dx));
-                        int c = pix[ny * w + nx];
-                        aa += (c >> 24) & 0xFF;
-                        ra += (c >> 16) & 0xFF;
-                        ga += (c >> 8) & 0xFF;
-                        ba += c & 0xFF;
-                        count++;
-                    }
-                }
-                out[y * w + x] = ((aa / count) << 24) | ((ra / count) << 16)
-                        | ((ga / count) << 8) | (ba / count);
-            }
-        }
-        bmp.setPixels(out, 0, w, 0, 0, w, h);
     }
 
     /**
