@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LW Launcher — Ultra-Lightweight Pixel-Style Android Launcher</title>
+  <meta name="description" content="LW Launcher is an ultra-lightweight (~403 KB), pure-Java Android 11–17 home launcher with 60–180 Hz refresh pacing, Pixel launch morphing, SurfaceFlinger blur, Widget Stacks, and zero root required." />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ambient-glow" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="container nav-row">
+      <a class="brand" href="#top">
+        <img src="assets/logo.png" alt="LW Launcher logo" class="brand-logo" width="34" height="34" />
+        <span class="brand-name">LW Launcher</span>
+        <span class="brand-badge">v4.0.1</span>
+      </a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="#preview">Preview</a>
+        <a href="#features">Features</a>
+        <a href="#compare">Compare</a>
+        <a href="#download">Download</a>
+        <button id="themeToggleBtn" class="icon-btn" type="button" aria-label="Toggle light and dark theme" title="Toggle Light / Dark">
+          <span id="themeIcon">☀</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero container">
+      <div class="hero-copy">
+        <div class="eyebrow">Pure Java &bull; Zero Root &bull; Android 11–17</div>
+        <h1>Pixel craft, rebuilt at <span class="gradient-text">~403 KB</span>.</h1>
+        <p class="lead">
+          LW Launcher delivers Pixel-style adaptive icon launch morphs, auto-adaptive 60–180 Hz motion pacing,
+          full-color Google search shortcuts, standalone At a Glance weather, and adaptive Android 11–17 blur—with zero bloat or Gradle overhead.
+        </p>
+
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="https://github.com/srijibdalal1974/lw-launcher/releases/download/v4.0.1/LW_Launcher_v4.0.1.apk">
+            Download v4.0.1 APK
+            <span class="btn-sub">403 KB</span>
+          </a>
+          <a class="btn btn-secondary" href="https://github.com/srijibdalal1974/lw-launcher/releases/download/v4.0.1/LW_Launcher_v4.0.1.aab">
+            App Bundle (.AAB)
+            <span class="btn-sub">229 KB</span>
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/srijibdalal1974/lw-launcher" target="_blank" rel="noopener">
+            GitHub Repo &nearr;
+          </a>
+        </div>
+
+        <div class="stats-strip" role="list">
+          <div class="stat-pill" role="listitem">
+            <strong>403 KB</strong>
+            <span>Universal APK</span>
+          </div>
+          <div class="stat-pill" role="listitem">
+            <strong>180 Hz</strong>
+            <span>Display Pacing</span>
+          </div>
+          <div class="stat-pill" role="listitem">
+            <strong>API 30–36+</strong>
+            <span>Android 11–17</span>
+          </div>
+          <div class="stat-pill" role="listitem">
+            <strong>Apache 2.0</strong>
+            <span>Open Source</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- INTERACTIVE LIVE PREVIEW PHONE -->
+      <div class="hero-preview" id="preview">
+        <div class="preview-controls" role="group" aria-label="Launcher surface and mode switcher">
+          <div class="control-group">
+            <span class="control-label">Surface (Android 12–17)</span>
+            <div class="seg-row" id="surfacePills">
+              <button type="button" class="seg-btn active" data-surface="pixel">Pixel Clean</button>
+              <button type="button" class="seg-btn" data-surface="glass">Liquid Glass</button>
+              <button type="button" class="seg-btn" data-surface="amoled">AMOLED</button>
+            </div>
+          </div>
+          <div class="control-group">
+            <span class="control-label">Screen View</span>
+            <div class="seg-row" id="screenPills">
+              <button type="button" class="seg-btn active" data-screen="home">Home</button>
+              <button type="button" class="seg-btn" data-screen="drawer">Drawer</button>
+              <button type="button" class="seg-btn" data-screen="folder">Paged Folder</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="phone-frame" id="phoneMockup" data-surface="pixel" data-screen="home">
+          <div class="phone-wallpaper"></div>
+          <div class="phone-notch"></div>
+          <div class="phone-status">
+            <span>12:00</span>
+            <span>5G &bull; 98%</span>
+          </div>
+
+          <!-- SCREEN 1: HOME SCREEN -->
+          <div class="phone-screen screen-home active">
+            <div class="glance-block">
+              <div class="glance-date">Fri, Nov 28</div>
+              <div class="glance-weather">☀ 26&deg;C &bull; Clear sky</div>
+              <div class="glance-media surface-card" id="mockMediaCard">
+                <div class="media-art">♪</div>
+                <div class="media-meta">
+                  <div class="media-title">Midnight Horizon</div>
+                  <div class="media-artist">Now Playing &bull; MediaSession</div>
+                </div>
+                <button type="button" class="media-ctrl" id="mockPlayBtn" aria-label="Play pause preview">❚❚</button>
+              </div>
+            </div>
+
+            <div class="widget-stack surface-card" id="mockWidgetStack" title="Click to cycle stacked widgets">
+              <div class="stack-body">
+                <div class="stack-tag" id="stackTag">WIDGET STACK &bull; 1/3</div>
+                <div class="stack-title" id="stackTitle">Daily Focus &bull; 2:30 PM Review</div>
+                <div class="stack-sub" id="stackSub">Tap stack to cycle Calendar / Battery / Weather</div>
+              </div>
+              <div class="stack-dots" aria-hidden="true">
+                <span class="sdot active"></span>
+                <span class="sdot"></span>
+                <span class="sdot"></span>
+              </div>
+            </div>
+
+            <div class="mock-grid">
+              <div class="mock-app">
+                <div class="m-icon" style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);">G</div>
+                <span>Search</span>
+              </div>
+              <div class="mock-app cover-folder">
+                <div class="m-icon" style="background:linear-gradient(135deg,#10b981,#047857);">Cam<i class="cover-pip"></i></div>
+                <span>Photos</span>
+              </div>
+              <div class="mock-app">
+                <div class="m-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);">Note</div>
+                <span>Keep</span>
+              </div>
+              <div class="mock-app">
+                <div class="m-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);">♪</div>
+                <span>Music</span>
+              </div>
+            </div>
+
+            <div class="mock-dock-wrap">
+              <div class="mock-dock">
+                <span class="d-ico" style="background:#22c55e;">☎</span>
+                <span class="d-ico" style="background:#3b82f6;">💬</span>
+                <span class="d-ico" style="background:#ef4444;">🌐</span>
+                <span class="d-ico" style="background:#f59e0b;">▶</span>
+                <span class="d-ico" style="background:#64748b;">📷</span>
+              </div>
+              <div class="mock-search surface-card">
+                <span class="g-dot">G</span>
+                <span class="s-placeholder">Search apps, timer 5m, 100 c to f...</span>
+                <span class="s-mic">🎙</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 2: APP DRAWER + SMART CATEGORIES -->
+          <div class="phone-screen screen-drawer">
+            <div class="drawer-sheet surface-sheet">
+              <div class="sheet-handle"></div>
+              <div class="drawer-search surface-card">
+                <span class="g-dot">G</span>
+                <span>timer 5m &bull; 2 gb to mb</span>
+              </div>
+              <div class="drawer-cats">
+                <span class="cat-pill active">All</span>
+                <span class="cat-pill">Social</span>
+                <span class="cat-pill">Media</span>
+                <span class="cat-pill">Work</span>
+                <span class="cat-pill">Finance</span>
+              </div>
+              <div class="quick-answer surface-accent">
+                <strong>2048 MB</strong>
+                <span>Tap to copy</span>
+              </div>
+              <div class="mock-grid drawer-grid">
+                <div class="mock-app"><div class="m-icon" style="background:#0ea5e9;">Cal</div><span>Calendar</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#ef4444;">YT</div><span>YouTube</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#10b981;">WA</div><span>WhatsApp</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#6366f1;">⚙</div><span>Settings</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#f97316;">GM</div><span>Gmail</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#ec4899;">IG</div><span>Instagram</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#14b8a6;">GP</div><span>Wallet</span></div>
+                <div class="mock-app"><div class="m-icon" style="background:#8b5cf6;">🔒</div><span>Vault</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 3: PAGED FOLDER POPUP -->
+          <div class="phone-screen screen-folder">
+            <div class="folder-backdrop">
+              <div class="folder-card surface-sheet">
+                <div class="folder-title">Productivity</div>
+                <div class="mock-grid folder-grid">
+                  <div class="mock-app"><div class="m-icon" style="background:#2563eb;">Docs</div><span>Docs</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#16a34a;">Sht</div><span>Sheets</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#eab308;">Sld</div><span>Slides</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#dc2626;">PDF</div><span>Drive</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#7c3aed;">Tsk</div><span>Tasks</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#0891b2;">Mtg</div><span>Meet</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#4f46e5;">Slk</div><span>Slack</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#059669;">Ntn</div><span>Notion</span></div>
+                  <div class="mock-app"><div class="m-icon" style="background:#ea580c;">Mail</div><span>Mail</span></div>
+                </div>
+                <div class="folder-dots">
+                  <span class="fdot active"></span>
+                  <span class="fdot"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- CORE V4.0.1 FEATURES -->
+    <section class="section container" id="features">
+      <div class="section-head">
+        <h2>Engineered for Speed, Clarity &amp; Smoothness</h2>
+        <p>Built from scratch in pure Java without bloated support libraries—keeping the signed universal APK under 410 KB while delivering flagship Pixel responsiveness.</p>
+      </div>
+
+      <div class="cards-grid">
+        <article class="feature-card">
+          <div class="f-icon">🚀</div>
+          <h3>Continuous Pixel App Morph</h3>
+          <p><code>LaunchTransitionView</code> morphs from exact icon bounds into rounded Material You splash surfaces with separated adaptive foreground/background parallax and warm/cold pre-warming.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="f-icon">⚡</div>
+          <h3>Auto 60–180 Hz Display Pacing</h3>
+          <p><code>DisplayRefreshHelper</code> detects panel refresh modes (60, 90, 120, up to 180 Hz) and scales fling physics, overshoot tension, and <code>Surface.setFrameRate</code> on interaction.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="f-icon">❄</div>
+          <h3>Adaptive Android 11–17 Blur</h3>
+          <p>Uses native <code>RenderEffect</code> &amp; SurfaceFlinger wallpaper blur on Android 12–17, and automatically drops to a zero-GPU-cost solid scrim on Android 11 so motion stays silky at 120 Hz.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="f-icon">🔍</div>
+          <h3>Full-Color Search Capsule</h3>
+          <p>Authentic 4-color Google G, Mic, and Lens shortcuts paired with inline app ranking, live web suggestions, Play Store search fallback, and deterministic 12dp swipe-vs-tap isolation.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="f-icon">🌦</div>
+          <h3>Standalone At a Glance Weather</h3>
+          <p>Works on Pixel and non-Pixel phones alike using Open-Meteo and real-time <code>NetworkCallback</code> sync across Wi-Fi and mobile data without requiring Google Smartspace privileges.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="f-icon">🗂</div>
+          <h3>DragLayer, Folders &amp; Theming</h3>
+          <p>Multi-page chip drag overlay, top Remove &amp; Uninstall drop zones, smart auto-dissolving folders, and dynamic Light/Dark Material You palette synchronization.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- V5 PROTOTYPE ROADMAP SECTION -->
+    <section class="section container" id="roadmap">
+      <div class="roadmap-banner">
+        <div class="roadmap-head">
+          <span class="tag-pill">Next Up &bull; v5 Prototype In Progress</span>
+          <h2>Even Deeper Standout Capabilities</h2>
+          <p>Expanding LW Launcher beyond stock Pixel Launcher and zero-root competitors while keeping core APK size compact.</p>
+        </div>
+
+        <div class="roadmap-grid">
+          <div class="road-item">
+            <h4>Zero-Root Widget Stacks</h4>
+            <p>Drag widgets together to create vertical swipeable stacks with live dot indicators and per-slot resizing.</p>
+          </div>
+          <div class="road-item">
+            <h4>Liquid Glass &amp; AMOLED Presets</h4>
+            <p>Android 12–17 chooseable Pixel Clean, frosted Liquid Glass, and pitch-black AMOLED Minimal themes.</p>
+          </div>
+          <div class="road-item">
+            <h4>Live Media &amp; Timer Card</h4>
+            <p>Album art, track metadata, Play/Pause/Next controls, and live countdown timers directly in At a Glance.</p>
+          </div>
+          <div class="road-item">
+            <h4>Icon Packs &amp; Hybrid Masking</h4>
+            <p>Load Play Store APK icon packs with automatic color-toned shape masking, per-app swipe-up actions, and Biometric Lock.</p>
+          </div>
+          <div class="road-item">
+            <h4>Focus Home Profiles</h4>
+            <p>One-tap Standard, Work, Evening, and Travel home layouts backed by instant workspace JSON snapshots.</p>
+          </div>
+          <div class="road-item">
+            <h4>Quick Commands &amp; Discover</h4>
+            <p>Run <code>timer 5m</code>, <code>alarm 7:30</code>, <code>flashlight</code>, conversions, smart drawer categories, and the -1 Discover feed.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- COMPARISON TABLE -->
+    <section class="section container" id="compare">
+      <div class="section-head">
+        <h2>How LW Launcher Compares</h2>
+        <p>Designed to deliver zero-root flexibility and tiny binary efficiency side by side.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>LW Launcher</th>
+              <th>Stock Pixel Launcher</th>
+              <th>Lawnchair (Zero-Root)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>APK Download Footprint</td>
+              <td><span class="check-yes">~403 KB (v4.0.1)</span></td>
+              <td>System Priv-App Only</td>
+              <td>~18–25 MB</td>
+            </tr>
+            <tr>
+              <td>Android 11 Performance-Safe Fallback</td>
+              <td><span class="check-yes">Automatic Solid Scrim</span></td>
+              <td>Locked to Pixel OS</td>
+              <td>Shared Launcher3 path</td>
+            </tr>
+            <tr>
+              <td>60–180 Hz Interactive Frame Pacing</td>
+              <td><span class="check-yes">Built-in Auto Max</span></td>
+              <td>OS Driven</td>
+              <td>Standard UI animations</td>
+            </tr>
+            <tr>
+              <td>Standalone Open-Meteo At a Glance</td>
+              <td><span class="check-yes">Works on any OEM</span></td>
+              <td>Google App / Pixel only</td>
+              <td>Requires extra bridge</td>
+            </tr>
+            <tr>
+              <td>Pure Java &amp; Zero-Gradle Pipeline</td>
+              <td><span class="check-yes">AAPT2 + D8 + Bundletool</span></td>
+              <td>AOSP Soong Build</td>
+              <td>Heavy Gradle + Kotlin</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- DOWNLOAD & BUILD -->
+    <section class="section container" id="download">
+      <div class="download-card">
+        <div class="dl-left">
+          <span class="tag-pill">Official Public Release</span>
+          <h2>LW Launcher v4.0.1</h2>
+          <p>Signed with release keystore (<code>release.keystore</code>), zipaligned, and verified with <code>apksigner</code> and <code>bundletool validate</code>.</p>
+          <ul class="dl-meta">
+            <li><strong>Minimum Android:</strong> Android 11 (API 30)</li>
+            <li><strong>Target SDK:</strong> Android 16 / 17 (API 36)</li>
+            <li><strong>Universal APK Size:</strong> 412,690 bytes (403.0 KB)</li>
+            <li><strong>App Bundle Size:</strong> 234,608 bytes (229.1 KB)</li>
+          </ul>
+        </div>
+        <div class="dl-actions">
+          <a class="btn btn-primary btn-block" href="https://github.com/srijibdalal1974/lw-launcher/releases/download/v4.0.1/LW_Launcher_v4.0.1.apk">
+            Download LW_Launcher_v4.0.1.apk
+          </a>
+          <a class="btn btn-secondary btn-block" href="https://github.com/srijibdalal1974/lw-launcher/releases/download/v4.0.1/LW_Launcher_v4.0.1.aab">
+            Download LW_Launcher_v4.0.1.aab
+          </a>
+          <a class="btn btn-ghost btn-block" href="https://github.com/srijibdalal1974/lw-launcher/releases" target="_blank" rel="noopener">
+            All GitHub Releases &nearr;
+          </a>
+        </div>
+      </div>
+
+      <div class="build-box">
+        <div class="build-title">Zero-Gradle Local Build Command</div>
+        <pre><code>git clone https://github.com/srijibdalal1974/lw-launcher.git
+cd lw-launcher
+python build_release.py</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <div class="footer-brand">
+        <img src="assets/logo.png" alt="" width="24" height="24" />
+        <span>LW Launcher &bull; Apache License 2.0</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/srijibdalal1974/lw-launcher" target="_blank" rel="noopener">Source</a>
+        <a href="https://github.com/srijibdalal1974/lw-launcher/releases/latest" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/srijibdalal1974/lw-launcher/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
