@@ -16,6 +16,16 @@
   <img src="https://img.shields.io/badge/License-Apache_2.0-lightgrey.svg" />
 </p>
 
+<p align="center">
+  <a href="https://srijibdalal1974.github.io/lw-launcher/">
+    <img src="https://img.shields.io/badge/Download_Now-Website_%26_APK-2563EB?style=for-the-badge&logo=android&logoColor=white" alt="Download Now" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://srijibdalal1974.github.io/lw-launcher/"><strong>Download Now &rarr; srijibdalal1974.github.io/lw-launcher</strong></a>
+</p>
+
 ---
 
 ## Highlights in v4.0.0
